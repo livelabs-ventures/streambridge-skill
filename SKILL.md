@@ -17,16 +17,16 @@ Before substantial work:
 
 1. If no saved token exists yet, the scripts will ask for a StreamBridge API token on first run.
 2. The token is stored locally in `~/.streambridge/auth.json`.
-3. Run `python3 skills/streambridge/scripts/doctor.py` if auth or connectivity is unclear.
+3. Run `python3 scripts/doctor.py` if auth or connectivity is unclear.
 
 ## Golden path
 
 For a new event, prefer:
 
-1. Run `python3 skills/streambridge/scripts/quickstart.py "<user intent>" --template <template>`
+1. Run `python3 scripts/quickstart.py "<user intent>" --template <template>`
 2. Review the event, cameras, invite links, and preview URL
 3. Ask whether to publish unless the user explicitly requested publish
-4. If approved, run `python3 skills/streambridge/scripts/page.py publish <event-id>`
+4. If approved, run `python3 scripts/page.py publish <event-id>`
 
 ## Script selection
 

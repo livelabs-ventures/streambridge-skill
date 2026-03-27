@@ -5,7 +5,7 @@ Run these after installing the skill. If you have not used it before, it will as
 ## Grassroots sports
 
 ```bash
-python3 skills/streambridge/scripts/quickstart.py "Create a school rugby event with touchline, scoreboard, and crowd cameras"
+python3 scripts/quickstart.py "Create a school rugby event with touchline, scoreboard, and crowd cameras"
 ```
 
 Expected outcome:
@@ -19,7 +19,7 @@ Expected outcome:
 ## Endurance race
 
 ```bash
-python3 skills/streambridge/scripts/quickstart.py "Create an ultra-trail event with start, checkpoint, and finish cameras plus a race page" --template race
+python3 scripts/quickstart.py "Create an ultra-trail event with start, checkpoint, and finish cameras plus a race page" --template race
 ```
 
 Expected outcome:
@@ -31,7 +31,7 @@ Expected outcome:
 ## Breaking news
 
 ```bash
-python3 skills/streambridge/scripts/quickstart.py "Breaking: factory fire in Lyon. Create a live event with three field cameras and prepare to publish" --template news
+python3 scripts/quickstart.py "Breaking: factory fire in Lyon. Create a live event with three field cameras and prepare to publish" --template news
 ```
 
 Expected outcome:
