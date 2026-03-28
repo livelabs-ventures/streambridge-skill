@@ -1,35 +1,34 @@
 # StreamBridge Skill
 
-This directory is the canonical source for the public `streambridge` skill.
+Official StreamBridge skill for Claude Code, Codex, Manus, and other skills-compatible agents.
 
-## Repository model
-
-- Source of truth: the monorepo at `services/streambridge/skills/streambridge`
-- Public mirror: `https://github.com/livelabs-ventures/streambridge-skill`
-- Publish mechanism: `git subtree split`
-
-The public repo is a publish target, not a second source of truth.
-
-## Local commands
-
-Run commands from the root of the installed skill directory:
+## Install
 
 ```bash
-python3 scripts/doctor.py
-python3 scripts/quickstart.py "Create a school rugby event with touchline, scoreboard, and crowd cameras"
+npx skills add https://github.com/livelabs-ventures/streambridge-skill --skill streambridge
 ```
 
-## Publishing the public repo
+## What is included
 
-From the monorepo root:
+- `SKILL.md` with the operating instructions for agents
+- `scripts/streambridge` bash CLI for StreamBridge API and MCP access
+- `references/API.md` public API and MCP reference
+- `references/COMMANDS.md` ready-to-run command examples
+- `references/QUICKSTARTS.md` common starting prompts and flows
+- `references/TROUBLESHOOTING.md` auth and runtime troubleshooting
+
+## First run
+
+From the root of the installed `streambridge` skill directory:
 
 ```bash
-scripts/publish-streambridge-skill-subtree.sh
+bash scripts/streambridge doctor
 ```
 
-Environment overrides:
+The CLI prompts for a personal access token on first use and stores it in `~/.streambridge/auth.json`.
 
-- `PUBLIC_SKILL_REMOTE_NAME`
-- `PUBLIC_SKILL_REMOTE_URL`
-- `PUBLIC_SKILL_SPLIT_BRANCH`
-- `PUBLIC_SKILL_TARGET_BRANCH`
+## Public links
+
+- Skill repo: `https://github.com/livelabs-ventures/streambridge-skill`
+- Skill zip: `https://api.streambridge.live/downloads/streambridge-skill.zip`
+- Product docs: `https://app.streambridge.live/docs/mcp`

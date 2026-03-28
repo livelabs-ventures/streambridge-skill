@@ -1,0 +1,870 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+CONFIG_DIR="${HOME}/.streambridge"
+AUTH_PATH="${CONFIG_DIR}/auth.json"
+API_BASE="${STREAMBRIDGE_API_BASE:-${STREAMBRIDGE_API_URL:-https://api.streambridge.live/api/v1}}"
+MCP_URL="${STREAMBRIDGE_MCP_URL:-${API_BASE%/api/v1}/mcp}"
+TOKEN="${STREAMBRIDGE_API_TOKEN:-}"
+DEVICE_TOKEN="${STREAMBRIDGE_DEVICE_TOKEN:-}"
+
+print_error() {
+  printf '%s\n' "$*" >&2
+}
+
+pretty_json() {
+  if command -v jq >/dev/null 2>&1; then
+    jq . 2>/dev/null || cat
+  else
+    cat
+  fi
+}
+
+json_string() {
+  local value="${1:-}"
+  value=${value//\\/\\\\}
+  value=${value//\"/\\\"}
+  value=${value//$'\n'/\\n}
+  value=${value//$'\r'/\\r}
+  value=${value//$'\t'/\\t}
+  printf '"%s"' "$value"
+}
+
+url_encode() {
+  local input="${1:-}" output="" i ch
+  for ((i=0; i<${#input}; i++)); do
+    ch="${input:i:1}"
+    case "$ch" in
+      [a-zA-Z0-9.~_-]) output+="$ch" ;;
+      *) printf -v output '%s%%%02X' "$output" "'$ch" ;;
+    esac
+  done
+  printf '%s' "$output"
+}
+
+load_saved_token() {
+  [[ -n "$TOKEN" ]] && return 0
+  [[ -f "$AUTH_PATH" ]] || return 0
+  TOKEN="$(sed -n 's/.*"api_token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$AUTH_PATH" | head -n 1)"
+}
+
+save_token() {
+  local token="$1"
+  mkdir -p "$CONFIG_DIR"
+  chmod 700 "$CONFIG_DIR" 2>/dev/null || true
+  printf '{\n  "api_token": %s\n}\n' "$(json_string "$token")" > "${AUTH_PATH}.tmp"
+  mv "${AUTH_PATH}.tmp" "$AUTH_PATH"
+  chmod 600 "$AUTH_PATH" 2>/dev/null || true
+}
+
+ensure_token() {
+  load_saved_token
+  if [[ -n "$TOKEN" ]]; then
+    return 0
+  fi
+
+  if [[ ! -t 0 ]]; then
+    print_error "No StreamBridge API token found. Set STREAMBRIDGE_API_TOKEN or rerun interactively."
+    exit 1
+  fi
+
+  read -r -s -p "StreamBridge API token: " TOKEN
+  printf '\n' >&2
+  if [[ -z "$TOKEN" ]]; then
+    print_error "No token entered."
+    exit 1
+  fi
+
+  save_token "$TOKEN"
+}
+
+ensure_device_token() {
+  if [[ -n "$DEVICE_TOKEN" ]]; then
+    return 0
+  fi
+
+  if [[ ! -t 0 ]]; then
+    print_error "No StreamBridge device token found. Set STREAMBRIDGE_DEVICE_TOKEN or pass --device-token."
+    exit 1
+  fi
+
+  read -r -s -p "StreamBridge device token: " DEVICE_TOKEN
+  printf '\n' >&2
+  if [[ -z "$DEVICE_TOKEN" ]]; then
+    print_error "No device token entered."
+    exit 1
+  fi
+}
+
+request_with_headers() {
+  local method="$1" path="$2" payload="${3:-}" require_auth="${4:-1}"
+  shift 4 || true
+  local extra_headers=("$@")
+  local url body_file headers_file status
+  url="$path"
+  if [[ ! "$url" =~ ^https?:// ]]; then
+    url="${API_BASE%/}${path}"
+  fi
+
+  [[ "$require_auth" == "1" ]] && ensure_token
+
+  body_file="$(mktemp)"
+  headers_file="$(mktemp)"
+
+  local curl_args=(-sS -X "$method" "$url" -D "$headers_file" -o "$body_file" -H "Accept: application/json")
+  if [[ "$require_auth" == "1" ]]; then
+    curl_args+=(-H "Authorization: Bearer ${TOKEN}")
+  fi
+  curl_args+=("${extra_headers[@]}")
+  if [[ -n "$payload" ]]; then
+    curl_args+=(-H "Content-Type: application/json" -d "$payload")
+  fi
+
+  curl "${curl_args[@]}"
+  status="$(awk 'NR==1 {print $2}' "$headers_file")"
+
+  if [[ -s "$body_file" ]]; then
+    pretty_json < "$body_file"
+  else
+    printf '{\n  "ok": true,\n  "status": %s\n}\n' "${status:-204}"
+  fi
+
+  rm -f "$body_file" "$headers_file"
+
+  if [[ -n "$status" && "$status" -ge 400 ]]; then
+    print_error "HTTP ${status} ${method} ${url}"
+    exit 1
+  fi
+}
+
+request() {
+  request_with_headers "$1" "$2" "${3:-}" "${4:-1}"
+}
+
+request_with_device_token() {
+  ensure_device_token
+  request_with_headers "$1" "$2" "${3:-}" 0 -H "Authorization: Bearer ${DEVICE_TOKEN}"
+}
+
+mcp_request() {
+  local mode="$1" tool="${2:-}" args_json="${3:-{}}"
+  ensure_token
+
+  local headers_file session_id session_header=() init_payload payload
+  headers_file="$(mktemp)"
+  trap 'rm -f "$headers_file"' RETURN
+
+  init_payload='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"streambridge-skill-cli","version":"1.0"}}}'
+  curl -sS -D "$headers_file" -X POST "$MCP_URL" \
+    -H "Content-Type: application/json" \
+    -H "Accept: application/json" \
+    -H "Authorization: Bearer ${TOKEN}" \
+    -d "$init_payload" >/dev/null
+
+  session_id="$(grep -i 'mcp-session-id' "$headers_file" | sed 's/.*: //' | tr -d '\r' || true)"
+  if [[ -n "$session_id" ]]; then
+    session_header=(-H "Mcp-Session-Id: ${session_id}")
+  fi
+
+  curl -sS -X POST "$MCP_URL" \
+    -H "Content-Type: application/json" \
+    -H "Accept: application/json" \
+    -H "Authorization: Bearer ${TOKEN}" \
+    "${session_header[@]}" \
+    -d '{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}' >/dev/null
+
+  if [[ "$mode" == "tools" ]]; then
+    payload='{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
+  else
+    payload="$(printf '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":%s,"arguments":%s}}' "$(json_string "$tool")" "$args_json")"
+  fi
+
+  curl -sS -X POST "$MCP_URL" \
+    -H "Content-Type: application/json" \
+    -H "Accept: application/json" \
+    -H "Authorization: Bearer ${TOKEN}" \
+    "${session_header[@]}" \
+    -d "$payload" | pretty_json
+}
+
+cmd_doctor() {
+  request GET /auth/me "" 1
+}
+
+cmd_api() {
+  local method="${1:-}" path="${2:-}" payload="${3:-}"
+  [[ -n "$method" && -n "$path" ]] || usage
+  request "$method" "$path" "$payload" 1
+}
+
+cmd_mcp() {
+  local subcommand="${1:-}"
+  case "$subcommand" in
+    tools|list)
+      mcp_request tools
+      ;;
+    call)
+      local tool="${2:-}" args_json="${3:-{}}"
+      [[ -n "$tool" ]] || usage
+      mcp_request call "$tool" "$args_json"
+      ;;
+    *)
+      usage
+      ;;
+  esac
+}
+
+cmd_auth() {
+  local resource="${1:-}" action="${2:-}"
+  shift 2 || true
+  [[ "$resource" == "tokens" && -n "$action" ]] || usage
+
+  case "$action" in
+    list)
+      request GET /auth/tokens
+      ;;
+    create)
+      local name="${1:-}" expires_at="${2:-}"
+      [[ -n "$name" ]] || usage
+      local payload
+      payload="$(printf '{"token":{"name":%s%s}}' "$(json_string "$name")" "${expires_at:+,\"expires_at\":$(json_string "$expires_at")}")"
+      request POST /auth/tokens "$payload"
+      ;;
+    delete)
+      local token_id="${1:-}"
+      [[ -n "$token_id" ]] || usage
+      request DELETE "/auth/tokens/${token_id}"
+      ;;
+    *)
+      usage
+      ;;
+  esac
+}
+
+cmd_organizations() {
+  local action="${1:-}"
+  shift || true
+
+  case "$action" in
+    list)
+      local query="" page="" per_page=""
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --query) query="${2:-}"; shift 2 ;;
+          --page) page="${2:-}"; shift 2 ;;
+          --per-page) per_page="${2:-}"; shift 2 ;;
+          *) usage ;;
+        esac
+      done
+
+      local params=()
+      [[ -n "$query" ]] && params+=("query=$(url_encode "$query")")
+      [[ -n "$page" ]] && params+=("page=$(url_encode "$page")")
+      [[ -n "$per_page" ]] && params+=("per_page=$(url_encode "$per_page")")
+      if [[ ${#params[@]} -gt 0 ]]; then
+        request GET "/organizations?$(IFS='&'; echo "${params[*]}")"
+      else
+        request GET /organizations
+      fi
+      ;;
+    show)
+      local organization_id="${1:-}"
+      [[ -n "$organization_id" ]] || usage
+      request GET "/organizations/${organization_id}"
+      ;;
+    switch)
+      local organization_id="${1:-}"
+      [[ -n "$organization_id" ]] || usage
+      request POST "/organizations/${organization_id}/switch" "{}"
+      ;;
+    *)
+      usage
+      ;;
+  esac
+}
+
+cmd_events() {
+  local action="${1:-}" id name
+  shift || true
+  case "$action" in
+    list) request GET /events ;;
+    show) id="${1:-}"; [[ -n "$id" ]] || usage; request GET "/events/${id}" ;;
+    create) name="$*"; [[ -n "$name" ]] || usage; request POST /events "$(printf '{"event":{"name":%s}}' "$(json_string "$name")")" ;;
+    update) id="${1:-}"; shift || true; name="$*"; [[ -n "$id" && -n "$name" ]] || usage; request PATCH "/events/${id}" "$(printf '{"event":{"name":%s}}' "$(json_string "$name")")" ;;
+    delete) id="${1:-}"; [[ -n "$id" ]] || usage; request DELETE "/events/${id}" ;;
+    *) usage ;;
+  esac
+}
+
+cmd_streams() {
+  local action="${1:-}" id event_id="" status="" name protocol="srt" auto_start=0 from="" to="" aggregate="" limit=""
+  shift || true
+  case "$action" in
+    list)
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --event-id) event_id="${2:-}"; shift 2 ;;
+          --status) status="${2:-}"; shift 2 ;;
+          *) usage ;;
+        esac
+      done
+      local query=()
+      [[ -n "$event_id" ]] && query+=("event_id=$(url_encode "$event_id")")
+      [[ -n "$status" ]] && query+=("status=$(url_encode "$status")")
+      if [[ ${#query[@]} -gt 0 ]]; then
+        request GET "/streams?$(IFS='&'; echo "${query[*]}")"
+      else
+        request GET /streams
+      fi
+      ;;
+    show) id="${1:-}"; [[ -n "$id" ]] || usage; request GET "/streams/${id}" ;;
+    create)
+      event_id="${1:-}"; shift || true
+      name="${1:-}"; shift || true
+      [[ -n "$event_id" && -n "$name" ]] || usage
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --protocol) protocol="${2:-srt}"; shift 2 ;;
+          --start) auto_start=1; shift ;;
+          *) usage ;;
+        esac
+      done
+      request POST /streams "$(printf '{"stream":{"event_id":%s,"name":%s,"protocol":%s},"auto_start":%s}' "$(json_string "$event_id")" "$(json_string "$name")" "$(json_string "$protocol")" "$([[ "$auto_start" == "1" ]] && printf true || printf false)")"
+      ;;
+    update)
+      id="${1:-}"; shift || true
+      [[ -n "$id" ]] || usage
+      local payload='{"stream":{'
+      local first=1
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --name)
+            [[ "$first" == "0" ]] && payload+=','
+            payload+="\"name\":$(json_string "${2:-}")"
+            first=0
+            shift 2
+            ;;
+          --protocol)
+            [[ "$first" == "0" ]] && payload+=','
+            payload+="\"protocol\":$(json_string "${2:-}")"
+            first=0
+            shift 2
+            ;;
+          --status)
+            [[ "$first" == "0" ]] && payload+=','
+            payload+="\"status\":$(json_string "${2:-}")"
+            first=0
+            shift 2
+            ;;
+          *)
+            usage
+            ;;
+        esac
+      done
+      [[ "$first" == "0" ]] || usage
+      payload+='}}'
+      request PATCH "/streams/${id}" "$payload"
+      ;;
+    start) id="${1:-}"; [[ -n "$id" ]] || usage; request POST "/streams/${id}/start" ;;
+    stop) id="${1:-}"; [[ -n "$id" ]] || usage; request POST "/streams/${id}/stop" ;;
+    delete) id="${1:-}"; [[ -n "$id" ]] || usage; request DELETE "/streams/${id}" ;;
+    invite) id="${1:-}"; [[ -n "$id" ]] || usage; request GET "/public/streams/${id}/invite-url" "" 0 ;;
+    metrics)
+      id="${1:-}"; shift || true
+      [[ -n "$id" ]] || usage
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --from) from="${2:-}"; shift 2 ;;
+          --to) to="${2:-}"; shift 2 ;;
+          --aggregate) aggregate="${2:-}"; shift 2 ;;
+          --limit) limit="${2:-}"; shift 2 ;;
+          *) usage ;;
+        esac
+      done
+      local query=()
+      [[ -n "$from" ]] && query+=("from=$(url_encode "$from")")
+      [[ -n "$to" ]] && query+=("to=$(url_encode "$to")")
+      [[ -n "$aggregate" ]] && query+=("aggregate=$(url_encode "$aggregate")")
+      [[ -n "$limit" ]] && query+=("limit=$(url_encode "$limit")")
+      if [[ ${#query[@]} -gt 0 ]]; then
+        request GET "/streams/${id}/metrics?$(IFS='&'; echo "${query[*]}")"
+      else
+        request GET "/streams/${id}/metrics"
+      fi
+      ;;
+    *) usage ;;
+  esac
+}
+
+cmd_page() {
+  local action="${1:-}" event_id="${2:-}" payload="" prompt="" starter_kit="" published_url="" build_hash="" version="" status="" path="" content="" old_string="" new_string="" replace_all=0 recursive=1
+  shift 2 || true
+  [[ -n "$action" && -n "$event_id" ]] || usage
+  case "$action" in
+    status) request GET "/events/${event_id}/page" ;;
+    init)
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --prompt) prompt="${2:-}"; shift 2 ;;
+          --starter-kit) starter_kit="${2:-}"; shift 2 ;;
+          *) usage ;;
+        esac
+      done
+      payload='{"event_page":{'
+      local first=1
+      if [[ -n "$prompt" ]]; then payload+="\"generation_prompt\":$(json_string "$prompt")"; first=0; fi
+      if [[ -n "$starter_kit" ]]; then [[ "$first" == "0" ]] && payload+=','; payload+="\"starter_kit\":$(json_string "$starter_kit")"; fi
+      payload+='}}'
+      request POST "/events/${event_id}/page" "$payload"
+      ;;
+    update)
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --prompt) prompt="${2:-}"; shift 2 ;;
+          --starter-kit) starter_kit="${2:-}"; shift 2 ;;
+          --status) status="${2:-}"; shift 2 ;;
+          --build-hash) build_hash="${2:-}"; shift 2 ;;
+          *) usage ;;
+        esac
+      done
+      payload='{"event_page":{'
+      local first=1
+      if [[ -n "$prompt" ]]; then payload+="\"generation_prompt\":$(json_string "$prompt")"; first=0; fi
+      if [[ -n "$starter_kit" ]]; then [[ "$first" == "0" ]] && payload+=','; payload+="\"starter_kit\":$(json_string "$starter_kit")"; first=0; fi
+      if [[ -n "$status" ]]; then [[ "$first" == "0" ]] && payload+=','; payload+="\"status\":$(json_string "$status")"; first=0; fi
+      if [[ -n "$build_hash" ]]; then [[ "$first" == "0" ]] && payload+=','; payload+="\"build_hash\":$(json_string "$build_hash")"; fi
+      payload+='}}'
+      request PATCH "/events/${event_id}/page" "$payload"
+      ;;
+    build) request POST "/events/${event_id}/workspace/build" "{}" ;;
+    preview) request GET "/events/${event_id}/workspace/preview" ;;
+    render) request GET "/public/events/${event_id}/workspace/render" "" 0 ;;
+    live-url) request GET "/public/events/${event_id}/workspace/live" "" 0 ;;
+    files-list)
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --path) path="${2:-}"; shift 2 ;;
+          --non-recursive) recursive=0; shift ;;
+          *) usage ;;
+        esac
+      done
+      local query_parts=()
+      [[ -n "$path" ]] && query_parts+=("path=$(url_encode "$path")")
+      [[ "$recursive" == "0" ]] && query_parts+=("recursive=false")
+      if [[ ${#query_parts[@]} -gt 0 ]]; then
+        request GET "/events/${event_id}/workspace/files/list?$(IFS='&'; echo "${query_parts[*]}")"
+      else
+        request GET "/events/${event_id}/workspace/files/list"
+      fi
+      ;;
+    file-read)
+      path="${1:-}"
+      [[ -n "$path" ]] || usage
+      request GET "/events/${event_id}/workspace/files?path=$(url_encode "$path")"
+      ;;
+    file-write)
+      path="${1:-}" ; content="${2:-}"
+      [[ -n "$path" && -n "${content+x}" ]] || usage
+      request POST "/events/${event_id}/workspace/files" "$(printf '{"path":%s,"content":%s}' "$(json_string "$path")" "$(json_string "$content")")"
+      ;;
+    file-replace)
+      path="${1:-}" ; old_string="${2:-}" ; new_string="${3:-}"
+      shift 3 || true
+      [[ -n "$path" && -n "$old_string" && -n "${new_string+x}" ]] || usage
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --all) replace_all=1; shift ;;
+          *) usage ;;
+        esac
+      done
+      request PATCH "/events/${event_id}/workspace/files" "$(printf '{"path":%s,"old_string":%s,"new_string":%s,"replace_all":%s}' "$(json_string "$path")" "$(json_string "$old_string")" "$(json_string "$new_string")" "$([[ "$replace_all" == "1" ]] && printf true || printf false)")"
+      ;;
+    publish)
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --published-url) published_url="${2:-}"; shift 2 ;;
+          --build-hash) build_hash="${2:-}"; shift 2 ;;
+          *) usage ;;
+        esac
+      done
+      payload='{'
+      local first=1
+      if [[ -n "$published_url" ]]; then payload+="\"published_url\":$(json_string "$published_url")"; first=0; fi
+      if [[ -n "$build_hash" ]]; then [[ "$first" == "0" ]] && payload+=','; payload+="\"build_hash\":$(json_string "$build_hash")"; fi
+      payload+='}'
+      request POST "/events/${event_id}/page/publish" "$payload"
+      ;;
+    versions) request GET "/events/${event_id}/page/versions" ;;
+    rollback)
+      version="${1:-}"
+      [[ -n "$version" ]] || usage
+      request POST "/events/${event_id}/page/rollback" "$(printf '{"version":%s}' "$(json_string "$version")")"
+      ;;
+    *) usage ;;
+  esac
+}
+
+cmd_live() {
+  local action="${1:-}" event_id="${2:-}"
+  shift 2 || true
+  [[ -n "$action" && -n "$event_id" ]] || usage
+  case "$action" in
+    switch-camera)
+      local camera_identity="${1:-}"
+      [[ -n "$camera_identity" ]] || usage
+      request POST "/events/${event_id}/live/featured_camera" "$(printf '{"camera_identity":%s}' "$(json_string "$camera_identity")")"
+      ;;
+    notification)
+      local title="${1:-}" message="" kind="" duration_ms="" icon=""
+      shift || true
+      [[ -n "$title" ]] || usage
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --message) message="${2:-}"; shift 2 ;;
+          --type) kind="${2:-}"; shift 2 ;;
+          --duration-ms) duration_ms="${2:-}"; shift 2 ;;
+          --icon) icon="${2:-}"; shift 2 ;;
+          *) usage ;;
+        esac
+      done
+      local payload="{\"title\":$(json_string "$title")"
+      [[ -n "$message" ]] && payload+=",\"message\":$(json_string "$message")"
+      [[ -n "$kind" ]] && payload+=",\"type\":$(json_string "$kind")"
+      [[ -n "$duration_ms" ]] && payload+=",\"duration_ms\":${duration_ms}"
+      [[ -n "$icon" ]] && payload+=",\"icon\":$(json_string "$icon")"
+      payload+='}'
+      request POST "/events/${event_id}/live/notification" "$payload"
+      ;;
+    overlay)
+      local overlay_id="${1:-}" overlay_action="${2:-}" content="${3:-}" position="" duration_ms="" animate=""
+      [[ -n "$overlay_id" && -n "$overlay_action" ]] || usage
+      shift 3 || true
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --position) position="${2:-}"; shift 2 ;;
+          --duration-ms) duration_ms="${2:-}"; shift 2 ;;
+          --animate) animate="${2:-true}"; shift 2 ;;
+          *) usage ;;
+        esac
+      done
+      local payload="{\"overlay_id\":$(json_string "$overlay_id"),\"action\":$(json_string "$overlay_action")"
+      [[ -n "$content" ]] && payload+=",\"content\":$(json_string "$content")"
+      [[ -n "$position" ]] && payload+=",\"position\":$(json_string "$position")"
+      [[ -n "$duration_ms" ]] && payload+=",\"duration_ms\":${duration_ms}"
+      [[ -n "$animate" ]] && payload+=",\"animate\":${animate}"
+      payload+='}'
+      request POST "/events/${event_id}/live/overlay" "$payload"
+      ;;
+    leaderboard)
+      local entries_json="${1:-}" tab_index="" label="" icon=""
+      [[ -n "$entries_json" ]] || usage
+      shift || true
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --tab-index) tab_index="${2:-}"; shift 2 ;;
+          --label) label="${2:-}"; shift 2 ;;
+          --icon) icon="${2:-}"; shift 2 ;;
+          *) usage ;;
+        esac
+      done
+      local payload="{\"entries\":${entries_json}"
+      [[ -n "$tab_index" ]] && payload+=",\"tab_index\":${tab_index}"
+      [[ -n "$label" ]] && payload+=",\"label\":$(json_string "$label")"
+      [[ -n "$icon" ]] && payload+=",\"icon\":$(json_string "$icon")"
+      payload+='}'
+      request POST "/events/${event_id}/live/leaderboard" "$payload"
+      ;;
+    score)
+      local home_name="${1:-}" home_score="${2:-}" away_name="${3:-}" away_score="${4:-}" clock="${5:-}" status="${6:-}"
+      [[ -n "$home_name" && -n "$home_score" && -n "$away_name" && -n "$away_score" ]] || usage
+      request POST "/events/${event_id}/live/score" "$(printf '{"home":{"name":%s,"score":%s},"away":{"name":%s,"score":%s}%s%s}' \
+        "$(json_string "$home_name")" "$home_score" "$(json_string "$away_name")" "$away_score" \
+        "${clock:+,\"time\":$(json_string "$clock")}" \
+        "${status:+,\"status\":$(json_string "$status")}")"
+      ;;
+    stats)
+      local stats_json="${1:-}" title="${2:-}"
+      [[ -n "$stats_json" ]] || usage
+      request POST "/events/${event_id}/live/stats" "{\"stats\":${stats_json}${title:+,\"title\":$(json_string "$title")}}"
+      ;;
+    *) usage ;;
+  esac
+}
+
+cmd_feedback() {
+  local action="${1:-}"
+  shift || true
+  case "$action" in
+    list)
+      local kind="" status="" sort="" query="" following="" reporter=""
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --kind) kind="${2:-}"; shift 2 ;;
+          --status) status="${2:-}"; shift 2 ;;
+          --sort) sort="${2:-}"; shift 2 ;;
+          --query) query="${2:-}"; shift 2 ;;
+          --following) following="${2:-true}"; shift 2 ;;
+          --reporter) reporter="${2:-}"; shift 2 ;;
+          *) usage ;;
+        esac
+      done
+      local query_parts=()
+      [[ -n "$kind" ]] && query_parts+=("kind=$(url_encode "$kind")")
+      [[ -n "$status" ]] && query_parts+=("status=$(url_encode "$status")")
+      [[ -n "$sort" ]] && query_parts+=("sort=$(url_encode "$sort")")
+      [[ -n "$query" ]] && query_parts+=("query=$(url_encode "$query")")
+      [[ -n "$following" ]] && query_parts+=("following=$(url_encode "$following")")
+      [[ -n "$reporter" ]] && query_parts+=("reporter=$(url_encode "$reporter")")
+      if [[ ${#query_parts[@]} -gt 0 ]]; then
+        request GET "/feedback_items?$(IFS='&'; echo "${query_parts[*]}")"
+      else
+        request GET /feedback_items
+      fi
+      ;;
+    roadmap) request GET /feedback_items/roadmap ;;
+    show)
+      local feedback_id="${1:-}"
+      [[ -n "$feedback_id" ]] || usage
+      request GET "/feedback_items/${feedback_id}"
+      ;;
+    create)
+      local title="" description="" kind="feedback" status="open" event_id="" stream_id=""
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --title) title="${2:-}"; shift 2 ;;
+          --description) description="${2:-}"; shift 2 ;;
+          --kind) kind="${2:-feedback}"; shift 2 ;;
+          --status) status="${2:-open}"; shift 2 ;;
+          --event-id) event_id="${2:-}"; shift 2 ;;
+          --stream-id) stream_id="${2:-}"; shift 2 ;;
+          *) usage ;;
+        esac
+      done
+      [[ -n "$title" && -n "$description" ]] || usage
+      local payload="{\"feedback_item\":{\"kind\":$(json_string "$kind"),\"status\":$(json_string "$status"),\"title\":$(json_string "$title"),\"description_markdown\":$(json_string "$description"),\"context\":{\"source\":\"streambridge-skill\"}"
+      [[ -n "$event_id" ]] && payload+=",\"event_id\":$(json_string "$event_id")"
+      [[ -n "$stream_id" ]] && payload+=",\"stream_id\":$(json_string "$stream_id")"
+      payload+='}}'
+      request POST /feedback_items "$payload"
+      ;;
+    update)
+      local feedback_id="${1:-}"
+      shift || true
+      [[ -n "$feedback_id" ]] || usage
+      local title="" description="" assignee_id="" linked_event_id="" linked_stream_id=""
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --title) title="${2:-}"; shift 2 ;;
+          --description) description="${2:-}"; shift 2 ;;
+          --assignee-id) assignee_id="${2:-}"; shift 2 ;;
+          --event-id) linked_event_id="${2:-}"; shift 2 ;;
+          --stream-id) linked_stream_id="${2:-}"; shift 2 ;;
+          *) usage ;;
+        esac
+      done
+      local payload='{"feedback_item":{'
+      local first=1
+      if [[ -n "$title" ]]; then payload+="\"title\":$(json_string "$title")"; first=0; fi
+      if [[ -n "$description" ]]; then [[ "$first" == "0" ]] && payload+=','; payload+="\"description_markdown\":$(json_string "$description")"; first=0; fi
+      if [[ -n "$assignee_id" ]]; then [[ "$first" == "0" ]] && payload+=','; payload+="\"assignee_id\":$(json_string "$assignee_id")"; first=0; fi
+      if [[ -n "$linked_event_id" ]]; then [[ "$first" == "0" ]] && payload+=','; payload+="\"event_id\":$(json_string "$linked_event_id")"; first=0; fi
+      if [[ -n "$linked_stream_id" ]]; then [[ "$first" == "0" ]] && payload+=','; payload+="\"stream_id\":$(json_string "$linked_stream_id")"; fi
+      payload+='}}'
+      request PATCH "/feedback_items/${feedback_id}" "$payload"
+      ;;
+    delete)
+      local feedback_id="${1:-}"
+      [[ -n "$feedback_id" ]] || usage
+      request DELETE "/feedback_items/${feedback_id}"
+      ;;
+    comment)
+      local feedback_id="${1:-}" body="${2:-}"
+      [[ -n "$feedback_id" && -n "$body" ]] || usage
+      request POST "/feedback_items/${feedback_id}/comments" "$(printf '{"feedback_comment":{"body_markdown":%s}}' "$(json_string "$body")")"
+      ;;
+    comments)
+      local feedback_id="${1:-}"
+      [[ -n "$feedback_id" ]] || usage
+      request GET "/feedback_items/${feedback_id}/comments"
+      ;;
+    vote)
+      local feedback_id="${1:-}" action_type="${2:-create}"
+      [[ -n "$feedback_id" ]] || usage
+      if [[ "$action_type" == "delete" ]]; then
+        request DELETE "/feedback_items/${feedback_id}/vote"
+      else
+        request POST "/feedback_items/${feedback_id}/vote" "{}"
+      fi
+      ;;
+    follow)
+      local feedback_id="${1:-}" action_type="${2:-create}"
+      [[ -n "$feedback_id" ]] || usage
+      if [[ "$action_type" == "delete" ]]; then
+        request DELETE "/feedback_items/${feedback_id}/follow"
+      else
+        request POST "/feedback_items/${feedback_id}/follow" "{}"
+      fi
+      ;;
+    unfollow)
+      local feedback_id="${1:-}"
+      [[ -n "$feedback_id" ]] || usage
+      request DELETE "/feedback_items/${feedback_id}/follow"
+      ;;
+    unvote)
+      local feedback_id="${1:-}"
+      [[ -n "$feedback_id" ]] || usage
+      request DELETE "/feedback_items/${feedback_id}/vote"
+      ;;
+    status)
+      local feedback_id="${1:-}" next_status="${2:-}" reason="${3:-}"
+      [[ -n "$feedback_id" && -n "$next_status" ]] || usage
+      request PATCH "/feedback_items/${feedback_id}/status" "$(printf '{"feedback_item":{"status":%s%s}}' "$(json_string "$next_status")" "${reason:+,\"status_reason\":$(json_string "$reason")}")"
+      ;;
+    priority)
+      local feedback_id="${1:-}" next_priority="${2:-}"
+      [[ -n "$feedback_id" && -n "$next_priority" ]] || usage
+      request PATCH "/feedback_items/${feedback_id}/priority" "$(printf '{"feedback_item":{"priority":%s}}' "$(json_string "$next_priority")")"
+      ;;
+    duplicate)
+      local feedback_id="${1:-}" duplicate_of_id="${2:-}" reason="${3:-}"
+      [[ -n "$feedback_id" && -n "$duplicate_of_id" ]] || usage
+      request PATCH "/feedback_items/${feedback_id}/duplicate" "$(printf '{"feedback_item":{"duplicate_of_id":%s%s}}' "$(json_string "$duplicate_of_id")" "${reason:+,\"status_reason\":$(json_string "$reason")}")"
+      ;;
+    *) usage ;;
+  esac
+}
+
+cmd_public() {
+  local action="${1:-}"
+  shift || true
+  case "$action" in
+    viewer-token)
+      local event_id="${1:-}" viewer_name="${2:-}" viewer_id="${3:-}"
+      [[ -n "$event_id" && -n "$viewer_name" ]] || usage
+      request POST "/public/events/${event_id}/viewer_token" "$(printf '{"viewer_name":%s%s}' "$(json_string "$viewer_name")" "${viewer_id:+,\"viewer_id\":$(json_string "$viewer_id")}")" 0
+      ;;
+    invite)
+      local stream_id="${1:-}"
+      [[ -n "$stream_id" ]] || usage
+      request GET "/public/streams/${stream_id}/invite-url" "" 0
+      ;;
+    stream)
+      local stream_key="${1:-}"
+      [[ -n "$stream_key" ]] || usage
+      request GET "/public/streams/by-key/${stream_key}" "" 0
+      ;;
+    device-session)
+      local stream_key="${1:-}" device_id="${2:-}"
+      [[ -n "$stream_key" && -n "$device_id" ]] || usage
+      request POST "/public/streams/by-key/${stream_key}/device-session" "$(printf '{"device_id":%s}' "$(json_string "$device_id")")" 0
+      ;;
+    livekit)
+      local stream_key="${1:-}" provided_token=""
+      shift || true
+      [[ -n "$stream_key" ]] || usage
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --device-token) provided_token="${2:-}"; shift 2 ;;
+          *) usage ;;
+        esac
+      done
+      [[ -n "$provided_token" ]] && DEVICE_TOKEN="$provided_token"
+      request_with_device_token GET "/public/streams/by-key/${stream_key}/livekit"
+      ;;
+    telemetry)
+      local stream_key="${1:-}" latitude="${2:-}" longitude="${3:-}" provided_token=""
+      shift 3 || true
+      [[ -n "$stream_key" && -n "$latitude" && -n "$longitude" ]] || usage
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --device-token) provided_token="${2:-}"; shift 2 ;;
+          *) usage ;;
+        esac
+      done
+      [[ -n "$provided_token" ]] && DEVICE_TOKEN="$provided_token"
+      request_with_device_token POST "/public/streams/by-key/${stream_key}/telemetry" "$(printf '{"latitude":%s,"longitude":%s}' "$latitude" "$longitude")"
+      ;;
+    stream-metrics)
+      local stream_key="${1:-}" bitrate="${2:-}" latency_ms="${3:-}" dropped_frames="${4:-0}" packet_loss="" provided_token=""
+      shift 4 || true
+      [[ -n "$stream_key" && -n "$bitrate" && -n "$latency_ms" ]] || usage
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --packet-loss) packet_loss="${2:-}"; shift 2 ;;
+          --device-token) provided_token="${2:-}"; shift 2 ;;
+          *) usage ;;
+        esac
+      done
+      [[ -n "$provided_token" ]] && DEVICE_TOKEN="$provided_token"
+      local payload="{\"bitrate\":${bitrate},\"latency_ms\":${latency_ms},\"dropped_frames\":${dropped_frames}"
+      [[ -n "$packet_loss" ]] && payload+=",\"packet_loss\":${packet_loss}"
+      payload+='}'
+      request_with_device_token POST "/public/streams/by-key/${stream_key}/stream-metrics" "$payload"
+      ;;
+    leaderboard)
+      local event_id="${1:-}" race_id="${2:-}"
+      [[ -n "$event_id" && -n "$race_id" ]] || usage
+      request GET "/public/events/${event_id}/sportraxs/races/${race_id}/leaderboard" "" 0
+      ;;
+    results)
+      local event_id="${1:-}" race_id="${2:-}"
+      [[ -n "$event_id" && -n "$race_id" ]] || usage
+      request GET "/public/events/${event_id}/sportraxs/races/${race_id}/results" "" 0
+      ;;
+    *) usage ;;
+  esac
+}
+
+usage() {
+  cat <<'EOF'
+Usage:
+  bash scripts/streambridge doctor
+  bash scripts/streambridge auth tokens list|create|delete ...
+  bash scripts/streambridge api <METHOD> <PATH> [JSON]
+  bash scripts/streambridge mcp tools
+  bash scripts/streambridge mcp call <TOOL_NAME> [ARGS_JSON]
+  bash scripts/streambridge organizations list|show|switch ...
+  bash scripts/streambridge events list|show|create|update|delete ...
+  bash scripts/streambridge streams list|show|create|update|start|stop|delete|invite|metrics ...
+  bash scripts/streambridge page status|init|update|build|preview|render|live-url|files-list|file-read|file-write|file-replace|publish|versions|rollback ...
+  bash scripts/streambridge live switch-camera|notification|overlay|leaderboard|score|stats ...
+  bash scripts/streambridge feedback list|roadmap|show|create|update|delete|comment|comments|vote|unvote|follow|unfollow|status|priority|duplicate ...
+  bash scripts/streambridge public viewer-token|invite|stream|device-session|livekit|telemetry|stream-metrics|leaderboard|results ...
+
+Examples:
+  bash scripts/streambridge doctor
+  bash scripts/streambridge auth tokens create "Codex laptop" 2026-12-31T23:59:59Z
+  bash scripts/streambridge events create "School Rugby Finals"
+  bash scripts/streambridge streams create <event-id> "Touchline"
+  bash scripts/streambridge page init <event-id> --prompt "Create a clean sports page"
+  bash scripts/streambridge page files-list <event-id>
+  bash scripts/streambridge live switch-camera <event-id> stream_<stream-id>
+  bash scripts/streambridge feedback create --title "Lower third editor" --description "Need a reusable lower-third overlay"
+  bash scripts/streambridge public device-session <stream-key> <device-id>
+  bash scripts/streambridge api GET /organizations
+  bash scripts/streambridge mcp call create_viewer_token '{"event_id":"...","viewer_name":"Viewer"}'
+EOF
+  exit 1
+}
+
+main() {
+  local command="${1:-}"
+  shift || true
+  case "$command" in
+    doctor) cmd_doctor "$@" ;;
+    auth) cmd_auth "$@" ;;
+    api) cmd_api "$@" ;;
+    mcp) cmd_mcp "$@" ;;
+    organizations) cmd_organizations "$@" ;;
+    events) cmd_events "$@" ;;
+    streams) cmd_streams "$@" ;;
+    page) cmd_page "$@" ;;
+    live) cmd_live "$@" ;;
+    feedback) cmd_feedback "$@" ;;
+    public) cmd_public "$@" ;;
+    help|-h|--help|"") usage ;;
+    *) usage ;;
+  esac
+}
+
+main "$@"
