@@ -109,6 +109,65 @@ bash scripts/streambridge feedback priority <feedback-id> high
 bash scripts/streambridge feedback duplicate <feedback-id> <canonical-feedback-id> "Tracked elsewhere"
 ```
 
+## Sponsors
+
+```bash
+# Show what's configured on this event
+bash scripts/streambridge sponsors list <event-id>
+
+# Show one sponsor (resolve by name OR id)
+bash scripts/streambridge sponsors show <event-id> "Cell C"
+
+# Add a sponsor with all three assets
+bash scripts/streambridge sponsors add <event-id> "Cell C" \
+  --on start_line \
+  --link https://cellc.co.za/comrades \
+  --logo ./cellc/logo.svg \
+  --mobile ./cellc/mobile.png \
+  --pillar ./cellc/pillar.png
+
+# Add a sponsor with no assets yet (logo + banners added later)
+bash scripts/streambridge sponsors add <event-id> "Toyota" \
+  --on lead_car --link https://toyota.co.za
+
+# Swap one asset (by sponsor name)
+bash scripts/streambridge sponsors replace-asset <event-id> "Toyota" \
+  --pillar ./toyota/pillar-v2.png
+
+# Update any other field
+bash scripts/streambridge sponsors set <event-id> "Cell C" --link https://new-url.example
+bash scripts/streambridge sponsors set <event-id> "Cell C" --on women_lead --logo ./cellc/v2.svg
+
+# Pause / resume
+bash scripts/streambridge sponsors pause  <event-id> "Cell C"
+bash scripts/streambridge sponsors resume <event-id> "Cell C"
+
+# Remove
+bash scripts/streambridge sponsors remove <event-id> "Cell C"
+
+# Bulk from a manifest. Relative asset paths resolve against the manifest's directory.
+bash scripts/streambridge sponsors import <event-id> ./sponsors.json
+```
+
+Manifest shape (`sponsors.json`):
+
+```json
+{
+  "sponsors": [
+    {
+      "name": "Cell C",
+      "on": "start_line",
+      "link": "https://cellc.co.za/comrades",
+      "alt": "Cell C × Comrades — Buy Comrades Bundles",
+      "logo": "./cellc/logo.svg",
+      "mobile": "./cellc/mobile.png",
+      "pillar": "./cellc/pillar.png",
+      "active": true
+    }
+  ]
+}
+```
+
 ## Public device and viewer flows
 
 ```bash

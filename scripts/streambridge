@@ -146,6 +146,103 @@ request_with_device_token() {
   request_with_headers "$1" "$2" "${3:-}" 0 -H "Authorization: Bearer ${DEVICE_TOKEN}"
 }
 
+# Multipart form upload. Used for endpoints that accept files alongside scalar
+# fields — sponsor logos and banners are the canonical case. Each FORM_ARG
+# after the path is a single `-F` argument to curl: `key=value` for scalar
+# fields, `key=@path` for files.
+#
+#   request_multipart POST /events/X/campaigns \
+#     "sponsor_name=Cell C" "tag=cell_c" "logo=@./logo.svg"
+request_multipart() {
+  local method="$1" path="$2"
+  shift 2
+  local url body_file headers_file status
+  url="$path"
+  if [[ ! "$url" =~ ^https?:// ]]; then
+    url="${API_BASE%/}${path}"
+  fi
+  ensure_token
+  body_file="$(mktemp)"
+  headers_file="$(mktemp)"
+  local curl_args=(
+    -sS -X "$method" "$url"
+    -D "$headers_file" -o "$body_file"
+    -H "Accept: application/json"
+    -H "Authorization: Bearer ${TOKEN}"
+  )
+  local arg
+  for arg in "$@"; do
+    curl_args+=(-F "$arg")
+  done
+  curl "${curl_args[@]}"
+  status="$(awk 'NR==1 {print $2}' "$headers_file")"
+  if [[ -s "$body_file" ]]; then
+    pretty_json < "$body_file"
+  else
+    printf '{\n  "ok": true,\n  "status": %s\n}\n' "${status:-204}"
+  fi
+  rm -f "$body_file" "$headers_file"
+  if [[ -n "$status" && "$status" -ge 400 ]]; then
+    print_error "HTTP ${status} ${method} ${url}"
+    exit 1
+  fi
+}
+
+# True when the input matches the canonical UUID v4-ish shape we use for
+# every resource id. Lets sponsor verbs accept either a uuid OR a friendly
+# sponsor name.
+is_uuid() {
+  [[ "${1:-}" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]
+}
+
+# Resolve a sponsor reference to its id. Accepts either a uuid (returned
+# verbatim) or a sponsor name (looked up case-insensitively against the
+# event's campaigns index). Prints the id on stdout or exits non-zero with a
+# helpful "did you mean" list on stderr.
+resolve_sponsor_id() {
+  local event_id="$1" key="$2"
+  if is_uuid "$key"; then
+    printf '%s' "$key"
+    return 0
+  fi
+  if ! command -v jq >/dev/null 2>&1; then
+    print_error "jq is required to look up sponsors by name; install jq or pass the sponsor id directly."
+    exit 1
+  fi
+  ensure_token
+  local body
+  body="$(curl -sS -X GET "${API_BASE%/}/events/${event_id}/campaigns" \
+    -H "Accept: application/json" \
+    -H "Authorization: Bearer ${TOKEN}")"
+  local id
+  id="$(printf '%s' "$body" | jq -r --arg name "$key" '
+    .data
+    | map(select(
+        (.attributes.sponsor_name // "") | ascii_downcase
+        == ($name | ascii_downcase)
+      ))
+    | .[0].id // empty
+  ')"
+  if [[ -z "$id" ]]; then
+    print_error "No sponsor named \"$key\" on event $event_id."
+    if [[ -n "$body" ]]; then
+      print_error "Available sponsors:"
+      printf '%s' "$body" | jq -r '.data[]? | "  - \(.attributes.sponsor_name) (id: \(.id))"' >&2 || true
+    fi
+    exit 1
+  fi
+  printf '%s' "$id"
+}
+
+# Derive a default ad_tag from a sponsor name when --on is omitted. Lowercases,
+# replaces non-alphanumerics with underscores, and collapses runs. Mirrors the
+# slug shape the Rails Campaign validator accepts (a-z0-9_-).
+default_sponsor_tag() {
+  printf '%s' "$1" \
+    | tr '[:upper:]' '[:lower:]' \
+    | sed -E 's/[^a-z0-9]+/_/g; s/^_+|_+$//g'
+}
+
 mcp_request() {
   local mode="$1" tool="${2:-}" args_json="${3:-{}}"
   ensure_token
@@ -734,6 +831,182 @@ cmd_feedback() {
   esac
 }
 
+# Sponsor management — list, show, add, set (update any field), replace-asset
+# (asset-only update), pause/resume (toggle active), remove, import (bulk
+# from JSON manifest).
+#
+# Sponsors are bound to a camera via `--on <ad_tag>`; the public viewer page
+# matches `campaign.tag` against `stream.ad_tag` and renders the sponsor's
+# banner_mobile (portrait) or banner_pillar (immersive) accordingly.
+#
+# Every verb that mutates accepts either a sponsor id (uuid) OR a sponsor
+# name — resolution is case-insensitive against `sponsor_name`. This lets
+# agents speak in human terms ("update the Cell C logo to ...") instead of
+# tracking uuids.
+cmd_sponsors() {
+  local action="${1:-}"; shift || true
+  case "$action" in
+    list)
+      local event_id="${1:-}"
+      [[ -n "$event_id" ]] || usage
+      request GET "/events/${event_id}/campaigns"
+      ;;
+    show)
+      local event_id="${1:-}" key="${2:-}"
+      [[ -n "$event_id" && -n "$key" ]] || usage
+      local sid; sid="$(resolve_sponsor_id "$event_id" "$key")"
+      request GET "/events/${event_id}/campaigns/${sid}"
+      ;;
+    add)
+      local event_id="${1:-}" name="${2:-}"
+      [[ -n "$event_id" && -n "$name" ]] || usage
+      shift 2 || true
+      local tag="" link="" alt="" logo="" mobile="" pillar="" active="true"
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --on)         tag="${2:-}"; shift 2 ;;
+          --link)       link="${2:-}"; shift 2 ;;
+          --alt-text)   alt="${2:-}"; shift 2 ;;
+          --logo)       logo="${2:-}"; shift 2 ;;
+          --mobile)     mobile="${2:-}"; shift 2 ;;
+          --pillar)     pillar="${2:-}"; shift 2 ;;
+          --inactive)   active="false"; shift ;;
+          --active)     active="true"; shift ;;
+          *) usage ;;
+        esac
+      done
+      [[ -n "$tag" ]] || tag="$(default_sponsor_tag "$name")"
+      if [[ -z "$link" ]]; then
+        print_error "--link is required (the URL the sponsor banner clicks through to)"
+        exit 1
+      fi
+      [[ -n "$alt" ]] || alt="$name"
+      local form_args=(
+        "sponsor_name=$name"
+        "campaign_name=$name"
+        "tag=$tag"
+        "click_through_url=$link"
+        "alt_text=$alt"
+        "active=$active"
+      )
+      [[ -n "$logo" ]]   && form_args+=("logo=@$logo")
+      [[ -n "$mobile" ]] && form_args+=("banner_mobile=@$mobile")
+      [[ -n "$pillar" ]] && form_args+=("banner_pillar=@$pillar")
+      request_multipart POST "/events/${event_id}/campaigns" "${form_args[@]}"
+      ;;
+    set)
+      local event_id="${1:-}" key="${2:-}"
+      [[ -n "$event_id" && -n "$key" ]] || usage
+      shift 2 || true
+      local sid; sid="$(resolve_sponsor_id "$event_id" "$key")"
+      local form_args=()
+      local has_args=0
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --name)           form_args+=("sponsor_name=${2:-}"); has_args=1; shift 2 ;;
+          --campaign-name)  form_args+=("campaign_name=${2:-}"); has_args=1; shift 2 ;;
+          --on)             form_args+=("tag=${2:-}"); has_args=1; shift 2 ;;
+          --link)           form_args+=("click_through_url=${2:-}"); has_args=1; shift 2 ;;
+          --alt-text)       form_args+=("alt_text=${2:-}"); has_args=1; shift 2 ;;
+          --logo)           form_args+=("logo=@${2:-}"); has_args=1; shift 2 ;;
+          --mobile)         form_args+=("banner_mobile=@${2:-}"); has_args=1; shift 2 ;;
+          --pillar)         form_args+=("banner_pillar=@${2:-}"); has_args=1; shift 2 ;;
+          --active)         form_args+=("active=true"); has_args=1; shift ;;
+          --inactive)       form_args+=("active=false"); has_args=1; shift ;;
+          *) usage ;;
+        esac
+      done
+      if [[ "$has_args" == "0" ]]; then
+        print_error "Pass at least one field to update (e.g. --logo path or --link url)."
+        exit 1
+      fi
+      request_multipart PATCH "/events/${event_id}/campaigns/${sid}" "${form_args[@]}"
+      ;;
+    replace-asset)
+      local event_id="${1:-}" key="${2:-}"
+      [[ -n "$event_id" && -n "$key" ]] || usage
+      shift 2 || true
+      local sid; sid="$(resolve_sponsor_id "$event_id" "$key")"
+      local form_args=()
+      local has_asset=0
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --logo)   form_args+=("logo=@${2:-}"); has_asset=1; shift 2 ;;
+          --mobile) form_args+=("banner_mobile=@${2:-}"); has_asset=1; shift 2 ;;
+          --pillar) form_args+=("banner_pillar=@${2:-}"); has_asset=1; shift 2 ;;
+          *) usage ;;
+        esac
+      done
+      if [[ "$has_asset" == "0" ]]; then
+        print_error "Pass at least one asset (--logo, --mobile, --pillar)."
+        exit 1
+      fi
+      request_multipart PATCH "/events/${event_id}/campaigns/${sid}" "${form_args[@]}"
+      ;;
+    pause)
+      local event_id="${1:-}" key="${2:-}"
+      [[ -n "$event_id" && -n "$key" ]] || usage
+      local sid; sid="$(resolve_sponsor_id "$event_id" "$key")"
+      request_multipart PATCH "/events/${event_id}/campaigns/${sid}" "active=false"
+      ;;
+    resume)
+      local event_id="${1:-}" key="${2:-}"
+      [[ -n "$event_id" && -n "$key" ]] || usage
+      local sid; sid="$(resolve_sponsor_id "$event_id" "$key")"
+      request_multipart PATCH "/events/${event_id}/campaigns/${sid}" "active=true"
+      ;;
+    remove)
+      local event_id="${1:-}" key="${2:-}"
+      [[ -n "$event_id" && -n "$key" ]] || usage
+      local sid; sid="$(resolve_sponsor_id "$event_id" "$key")"
+      request DELETE "/events/${event_id}/campaigns/${sid}"
+      ;;
+    import)
+      local event_id="${1:-}" manifest="${2:-}"
+      [[ -n "$event_id" && -n "$manifest" ]] || usage
+      if [[ ! -f "$manifest" ]]; then
+        print_error "Manifest not found: $manifest"
+        exit 1
+      fi
+      if ! command -v jq >/dev/null 2>&1; then
+        print_error "jq is required for sponsors import; install jq or call sponsors add per row."
+        exit 1
+      fi
+      local manifest_dir
+      manifest_dir="$(cd "$(dirname "$manifest")" && pwd)"
+      local count i
+      count="$(jq '.sponsors | length' "$manifest")"
+      for ((i=0; i<count; i++)); do
+        local name on link alt logo mobile pillar active
+        name="$(jq -r ".sponsors[$i].name" "$manifest")"
+        on="$(jq -r ".sponsors[$i].on // empty" "$manifest")"
+        link="$(jq -r ".sponsors[$i].link // empty" "$manifest")"
+        alt="$(jq -r ".sponsors[$i].alt // empty" "$manifest")"
+        logo="$(jq -r ".sponsors[$i].logo // empty" "$manifest")"
+        mobile="$(jq -r ".sponsors[$i].mobile // empty" "$manifest")"
+        pillar="$(jq -r ".sponsors[$i].pillar // empty" "$manifest")"
+        active="$(jq -r ".sponsors[$i].active // true" "$manifest")"
+        [[ -n "$logo"   && "$logo"   != /* ]] && logo="$manifest_dir/$logo"
+        [[ -n "$mobile" && "$mobile" != /* ]] && mobile="$manifest_dir/$mobile"
+        [[ -n "$pillar" && "$pillar" != /* ]] && pillar="$manifest_dir/$pillar"
+        local args=("$event_id" "$name")
+        [[ -n "$on" ]]     && args+=(--on "$on")
+        [[ -n "$link" ]]   && args+=(--link "$link")
+        [[ -n "$alt" ]]    && args+=(--alt-text "$alt")
+        [[ -n "$logo" ]]   && args+=(--logo "$logo")
+        [[ -n "$mobile" ]] && args+=(--mobile "$mobile")
+        [[ -n "$pillar" ]] && args+=(--pillar "$pillar")
+        [[ "$active" == "false" ]] && args+=(--inactive)
+        printf '\n# Importing sponsor: %s\n' "$name" >&2
+        cmd_sponsors add "${args[@]}"
+      done
+      ;;
+    *)
+      usage
+      ;;
+  esac
+}
+
 cmd_public() {
   local action="${1:-}"
   shift || true
@@ -829,6 +1102,7 @@ Usage:
   bash scripts/streambridge page status|init|update|build|preview|render|live-url|files-list|file-read|file-write|file-replace|publish|versions|rollback ...
   bash scripts/streambridge live switch-camera|notification|overlay|leaderboard|score|stats ...
   bash scripts/streambridge feedback list|roadmap|show|create|update|delete|comment|comments|vote|unvote|follow|unfollow|status|priority|duplicate ...
+  bash scripts/streambridge sponsors list|show|add|set|replace-asset|pause|resume|remove|import ...
   bash scripts/streambridge public viewer-token|invite|stream|device-session|livekit|telemetry|stream-metrics|leaderboard|results ...
 
 Examples:
@@ -840,6 +1114,9 @@ Examples:
   bash scripts/streambridge page files-list <event-id>
   bash scripts/streambridge live switch-camera <event-id> stream_<stream-id>
   bash scripts/streambridge feedback create --title "Lower third editor" --description "Need a reusable lower-third overlay"
+  bash scripts/streambridge sponsors add <event-id> "Cell C" --on start_line --link https://cellc.co.za/comrades --logo cellc.svg --mobile cellc-mobile.png --pillar cellc-pillar.png
+  bash scripts/streambridge sponsors set  <event-id> "Cell C" --logo new-logo.svg
+  bash scripts/streambridge sponsors pause <event-id> "Cell C"
   bash scripts/streambridge public device-session <stream-key> <device-id>
   bash scripts/streambridge api GET /organizations
   bash scripts/streambridge mcp call create_viewer_token '{"event_id":"...","viewer_name":"Viewer"}'
@@ -861,6 +1138,7 @@ main() {
     page) cmd_page "$@" ;;
     live) cmd_live "$@" ;;
     feedback) cmd_feedback "$@" ;;
+    sponsors) cmd_sponsors "$@" ;;
     public) cmd_public "$@" ;;
     help|-h|--help|"") usage ;;
     *) usage ;;

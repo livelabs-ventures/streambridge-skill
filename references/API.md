@@ -107,6 +107,35 @@ The CLI prompts for a token on first use and stores it in `~/.streambridge/auth.
 - `POST /feedback_items/:feedback_item_id/follow`
 - `DELETE /feedback_items/:feedback_item_id/follow`
 
+### Sponsor campaigns
+
+Campaigns bind a sponsor to an event by `tag` — when a stream's `ad_tag`
+matches an active campaign's tag, the viewer page renders the sponsor's
+`banner_mobile` (portrait) or `banner_pillar` (immersive). The public skill
+exposes these as "sponsors" via `bash scripts/streambridge sponsors ...`,
+which is the natural word for organizers.
+
+- `GET /events/:event_id/campaigns`
+- `GET /events/:event_id/campaigns/:id`
+- `POST /events/:event_id/campaigns` (multipart/form-data)
+- `PATCH /events/:event_id/campaigns/:id` (multipart/form-data)
+- `DELETE /events/:event_id/campaigns/:id`
+
+Multipart fields (all optional on PATCH; `sponsor_name`, `tag`, and
+`click_through_url` required on POST):
+
+| Field | Type | Notes |
+|---|---|---|
+| `sponsor_name` | string | Display name shown on the viewer page |
+| `campaign_name` | string | Internal label; can equal `sponsor_name` |
+| `tag` | string | Matches `stream.ad_tag`. Slug: `a-z0-9_-`. Unique per active sponsor on the event. |
+| `click_through_url` | string | https URL the banner links to |
+| `alt_text` | string | Accessible alt text (≤240 chars). Defaults to `sponsor_name` if omitted. |
+| `active` | boolean | `true` (default) or `false`; tag uniqueness only applies to active rows. |
+| `logo` | file | ≤1 MB. png, jpg, webp, svg. |
+| `banner_mobile` | file | ≤2 MB. png, jpg, webp. Wide aspect (~2.7:1), left-anchored. |
+| `banner_pillar` | file | ≤5 MB. png, jpg, webp. Portrait, full-bleed. |
+
 ### Public device and viewer endpoints
 
 - `POST /public/events/:event_id/viewer_token`

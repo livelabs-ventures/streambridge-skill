@@ -44,8 +44,61 @@ python3 scripts/quickstart.py "<user intent>" --template <template>
 - Event pages and builds: `bash scripts/streambridge page ...`
 - Live overlays and switching: `bash scripts/streambridge live ...`
 - Feedback: `bash scripts/streambridge feedback ...`
+- Sponsors (logos and banners on the viewer page): `bash scripts/streambridge sponsors ...`
 - Direct REST fallback: `bash scripts/streambridge api <METHOD> <PATH> '<json>'`
 - Direct MCP fallback: `bash scripts/streambridge mcp call <tool> '<json>'`
+
+## Managing sponsors
+
+Sponsors are bound to a camera via an `ad_tag`. When a viewer watches that
+camera, the public page renders the sponsor's mobile banner (portrait) or
+pillar banner (landscape immersive) and routes click-throughs to the
+sponsor's URL.
+
+Every sponsor verb accepts either a sponsor name OR a sponsor id — resolve
+the organizer's natural reference ("the Cell C sponsor", "update Toyota's
+pillar to ...") to the right call without asking them for a uuid.
+
+Common operations:
+
+- Show what's configured: `bash scripts/streambridge sponsors list <event-id>`
+- Inspect one: `bash scripts/streambridge sponsors show <event-id> "Cell C"`
+- Add a new sponsor (all-in-one):
+
+  ```bash
+  bash scripts/streambridge sponsors add <event-id> "Cell C" \
+    --on start_line \
+    --link https://cellc.co.za/comrades \
+    --logo logo.svg --mobile mobile.png --pillar pillar.png
+  ```
+
+- Update any field, including swapping an asset:
+
+  ```bash
+  bash scripts/streambridge sponsors set <event-id> "Cell C" --logo new-logo.svg
+  bash scripts/streambridge sponsors set <event-id> "Cell C" --link https://...
+  ```
+
+- Asset-only swap (more honest verb when only changing artwork):
+
+  ```bash
+  bash scripts/streambridge sponsors replace-asset <event-id> "Toyota" --pillar new-pillar.png
+  ```
+
+- Temporarily hide / show again: `pause` / `resume`
+- Remove: `bash scripts/streambridge sponsors remove <event-id> "Cell C"`
+- Bulk import from a manifest: `bash scripts/streambridge sponsors import <event-id> sponsors.json`
+
+Asset rules to respect when uploading:
+
+| Asset | Max size | MIME types | When used |
+|---|---|---|---|
+| `--logo` | 1 MB | png, jpg, webp, svg | Small mark composited on the map marker pill |
+| `--mobile` | 2 MB | png, jpg, webp | Full-width banner on phones (~2.7:1, design with logo/copy left-anchored) |
+| `--pillar` | 5 MB | png, jpg, webp | Portrait, full-bleed immersive on the desktop watch page |
+
+Important: tags must be unique among **active** sponsors per event. To
+re-use an `ad_tag`, `pause` or `remove` the previous sponsor first.
 
 ## Publish rule
 
