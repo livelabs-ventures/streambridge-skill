@@ -166,7 +166,12 @@ bash scripts/streambridge auth tokens create "Codex laptop" 2026-12-31T23:59:59Z
 
 ```bash
 bash scripts/streambridge api POST /streams '{"stream":{"event_id":"<event-id>","name":"Touchline","protocol":"srt"}}'
+bash scripts/streambridge api PATCH /streams/<stream-id> '{"stream":{"publicly_visible":false}}'
 ```
+
+Streams are public by default. Set `publicly_visible=false` to hide a camera
+from public event pages while keeping invite URLs, device sessions, telemetry,
+and publishing available.
 
 ### Publish a page
 
@@ -212,6 +217,7 @@ The MCP tool set is narrower than the full REST API. When a route is not exposed
 - `list_streams`
 - `get_stream`
 - `create_stream`
+- `update_stream_visibility`
 - `start_stream`
 - `stop_stream`
 - `delete_stream`
