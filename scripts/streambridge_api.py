@@ -173,7 +173,7 @@ class StreamBridgeClient:
     def get_stream(self, stream_id: str) -> dict[str, Any]:
         return self.request("GET", f"/streams/{stream_id}")
 
-    def create_stream(self, event_id: str, name: str, protocol: str = "srt", auto_start: bool = False) -> dict[str, Any]:
+    def create_stream(self, event_id: str, name: str, protocol: str = "srt", auto_start: bool = False, publicly_visible: bool = True) -> dict[str, Any]:
         return self.request(
             "POST",
             "/streams",
@@ -183,9 +183,13 @@ class StreamBridgeClient:
                     "name": name,
                     "protocol": protocol,
                     "auto_start": auto_start,
+                    "publicly_visible": publicly_visible,
                 }
             },
         )
+
+    def update_stream_visibility(self, stream_id: str, publicly_visible: bool) -> dict[str, Any]:
+        return self.request("PATCH", f"/streams/{stream_id}", {"stream": {"publicly_visible": publicly_visible}})
 
     def start_stream(self, stream_id: str) -> dict[str, Any]:
         return self.request("POST", f"/streams/{stream_id}/start")

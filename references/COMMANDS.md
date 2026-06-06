@@ -54,7 +54,10 @@ bash scripts/streambridge events delete <event-id>
 ```bash
 bash scripts/streambridge streams list --event-id <event-id>
 bash scripts/streambridge streams create <event-id> "Finish Line"
+bash scripts/streambridge streams create <event-id> "Private Moto" --hidden
 bash scripts/streambridge streams update <stream-id> --name "Finish Line A" --protocol srt
+bash scripts/streambridge streams update <stream-id> --hidden
+bash scripts/streambridge streams update <stream-id> --public
 bash scripts/streambridge streams show <stream-id>
 bash scripts/streambridge streams start <stream-id>
 bash scripts/streambridge streams stop <stream-id>

@@ -394,7 +394,7 @@ cmd_events() {
 }
 
 cmd_streams() {
-  local action="${1:-}" id event_id="" status="" name protocol="srt" auto_start=0 from="" to="" aggregate="" limit=""
+  local action="${1:-}" id event_id="" status="" name protocol="srt" auto_start=0 from="" to="" aggregate="" limit="" publicly_visible=1
   shift || true
   case "$action" in
     list)
@@ -423,10 +423,12 @@ cmd_streams() {
         case "$1" in
           --protocol) protocol="${2:-srt}"; shift 2 ;;
           --start) auto_start=1; shift ;;
+          --hidden) publicly_visible=0; shift ;;
+          --public) publicly_visible=1; shift ;;
           *) usage ;;
         esac
       done
-      request POST /streams "$(printf '{"stream":{"event_id":%s,"name":%s,"protocol":%s},"auto_start":%s}' "$(json_string "$event_id")" "$(json_string "$name")" "$(json_string "$protocol")" "$([[ "$auto_start" == "1" ]] && printf true || printf false)")"
+      request POST /streams "$(printf '{"stream":{"event_id":%s,"name":%s,"protocol":%s,"publicly_visible":%s},"auto_start":%s}' "$(json_string "$event_id")" "$(json_string "$name")" "$(json_string "$protocol")" "$([[ "$publicly_visible" == "1" ]] && printf true || printf false)" "$([[ "$auto_start" == "1" ]] && printf true || printf false)")"
       ;;
     update)
       id="${1:-}"; shift || true
@@ -452,6 +454,18 @@ cmd_streams() {
             payload+="\"status\":$(json_string "${2:-}")"
             first=0
             shift 2
+            ;;
+          --public)
+            [[ "$first" == "0" ]] && payload+=','
+            payload+="\"publicly_visible\":true"
+            first=0
+            shift
+            ;;
+          --hidden)
+            [[ "$first" == "0" ]] && payload+=','
+            payload+="\"publicly_visible\":false"
+            first=0
+            shift
             ;;
           *)
             usage
@@ -1110,6 +1124,7 @@ Examples:
   bash scripts/streambridge auth tokens create "Codex laptop" 2026-12-31T23:59:59Z
   bash scripts/streambridge events create "School Rugby Finals"
   bash scripts/streambridge streams create <event-id> "Touchline"
+  bash scripts/streambridge streams update <stream-id> --hidden|--public
   bash scripts/streambridge page init <event-id> --prompt "Create a clean sports page"
   bash scripts/streambridge page files-list <event-id>
   bash scripts/streambridge live switch-camera <event-id> stream_<stream-id>

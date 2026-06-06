@@ -41,6 +41,8 @@ python3 scripts/quickstart.py "<user intent>" --template <template>
 - Health and auth verification: `bash scripts/streambridge doctor`
 - Events: `bash scripts/streambridge events ...`
 - Cameras and streams: `bash scripts/streambridge streams ...`
+  - Cameras are public by default; use `streams update <stream-id> --hidden`
+    or `--public` to control public event page visibility.
 - Event pages and builds: `bash scripts/streambridge page ...`
 - Live overlays and switching: `bash scripts/streambridge live ...`
 - Feedback: `bash scripts/streambridge feedback ...`
