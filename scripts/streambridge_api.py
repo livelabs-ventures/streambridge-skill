@@ -198,7 +198,7 @@ class StreamBridgeClient:
         return self.request("POST", f"/streams/{stream_id}/stop")
 
     def get_stream_invite(self, stream_id: str) -> dict[str, Any]:
-        return self.request("GET", f"/public/streams/{stream_id}/invite-url", require_auth=False)
+        return self.request("GET", f"/public/streams/{stream_id}/invite-url")
 
     def get_event_page(self, event_id: str) -> dict[str, Any]:
         return self.request("GET", f"/events/{event_id}/page")

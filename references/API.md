@@ -63,6 +63,17 @@ The CLI prompts for a token on first use and stores it in `~/.streambridge/auth.
 - `POST /streams/:id/stop`
 - `GET /streams/:id/metrics`
 
+### Camera invitations
+
+- `GET /public/streams/:id/invite-url`
+
+Despite the legacy `/public` path, issuing an invitation requires the host's
+bearer token and a camera in the host's current organization. Both
+`streams invite <stream-id>` and the compatibility alias `public invite <stream-id>`
+send the saved host token. The Python client's `get_stream_invite` does the same.
+Finished shows cannot receive camera invitations. Treat invitation URLs as
+publishing credentials and share them only with the intended camera operator.
+
 ### Event pages
 
 - `GET /events/:event_id/page`
@@ -141,7 +152,6 @@ Multipart fields (all optional on PATCH; `sponsor_name`, `tag`, and
 - `POST /public/events/:event_id/viewer_token`
 - `GET /public/events/:event_id/sportraxs/races/:race_id/leaderboard`
 - `GET /public/events/:event_id/sportraxs/races/:race_id/results`
-- `GET /public/streams/:id/invite-url`
 - `GET /public/streams/by-key/:stream_key`
 - `POST /public/streams/by-key/:stream_key/device-session`
 - `GET /public/streams/by-key/:stream_key/livekit`

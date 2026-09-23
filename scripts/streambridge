@@ -479,7 +479,7 @@ cmd_streams() {
     start) id="${1:-}"; [[ -n "$id" ]] || usage; request POST "/streams/${id}/start" ;;
     stop) id="${1:-}"; [[ -n "$id" ]] || usage; request POST "/streams/${id}/stop" ;;
     delete) id="${1:-}"; [[ -n "$id" ]] || usage; request DELETE "/streams/${id}" ;;
-    invite) id="${1:-}"; [[ -n "$id" ]] || usage; request GET "/public/streams/${id}/invite-url" "" 0 ;;
+    invite) id="${1:-}"; [[ -n "$id" ]] || usage; request GET "/public/streams/${id}/invite-url" ;;
     metrics)
       id="${1:-}"; shift || true
       [[ -n "$id" ]] || usage
@@ -1033,7 +1033,7 @@ cmd_public() {
     invite)
       local stream_id="${1:-}"
       [[ -n "$stream_id" ]] || usage
-      request GET "/public/streams/${stream_id}/invite-url" "" 0
+      request GET "/public/streams/${stream_id}/invite-url"
       ;;
     stream)
       local stream_key="${1:-}"
