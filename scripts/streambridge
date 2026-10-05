@@ -3,8 +3,10 @@ set -euo pipefail
 
 CONFIG_DIR="${HOME}/.streambridge"
 AUTH_PATH="${CONFIG_DIR}/auth.json"
-API_BASE="${STREAMBRIDGE_API_BASE:-${STREAMBRIDGE_API_URL:-https://api.streambridge.live/api/v1}}"
-MCP_URL="${STREAMBRIDGE_MCP_URL:-${API_BASE%/api/v1}/mcp}"
+API_BASE="${STREAMBRIDGE_API_BASE:-${STREAMBRIDGE_API_BASE_URL:-${STREAMBRIDGE_API_URL:-https://api.streambridge.live/api/v1}}}"
+API_BASE="${API_BASE%/}"
+[[ "$API_BASE" == */api/v1 ]] || API_BASE="${API_BASE}/api/v1"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TOKEN="${STREAMBRIDGE_API_TOKEN:-}"
 DEVICE_TOKEN="${STREAMBRIDGE_DEVICE_TOKEN:-}"
 
@@ -31,6 +33,7 @@ json_string() {
 }
 
 url_encode() {
+  local LC_ALL=C
   local input="${1:-}" output="" i ch
   for ((i=0; i<${#input}; i++)); do
     ch="${input:i:1}"
@@ -243,47 +246,6 @@ default_sponsor_tag() {
     | sed -E 's/[^a-z0-9]+/_/g; s/^_+|_+$//g'
 }
 
-mcp_request() {
-  local mode="$1" tool="${2:-}" args_json="${3:-{}}"
-  ensure_token
-
-  local headers_file session_id session_header=() init_payload payload
-  headers_file="$(mktemp)"
-  trap 'rm -f "$headers_file"' RETURN
-
-  init_payload='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"streambridge-skill-cli","version":"1.0"}}}'
-  curl -sS -D "$headers_file" -X POST "$MCP_URL" \
-    -H "Content-Type: application/json" \
-    -H "Accept: application/json" \
-    -H "Authorization: Bearer ${TOKEN}" \
-    -d "$init_payload" >/dev/null
-
-  session_id="$(grep -i 'mcp-session-id' "$headers_file" | sed 's/.*: //' | tr -d '\r' || true)"
-  if [[ -n "$session_id" ]]; then
-    session_header=(-H "Mcp-Session-Id: ${session_id}")
-  fi
-
-  curl -sS -X POST "$MCP_URL" \
-    -H "Content-Type: application/json" \
-    -H "Accept: application/json" \
-    -H "Authorization: Bearer ${TOKEN}" \
-    "${session_header[@]}" \
-    -d '{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}' >/dev/null
-
-  if [[ "$mode" == "tools" ]]; then
-    payload='{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
-  else
-    payload="$(printf '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":%s,"arguments":%s}}' "$(json_string "$tool")" "$args_json")"
-  fi
-
-  curl -sS -X POST "$MCP_URL" \
-    -H "Content-Type: application/json" \
-    -H "Accept: application/json" \
-    -H "Authorization: Bearer ${TOKEN}" \
-    "${session_header[@]}" \
-    -d "$payload" | pretty_json
-}
-
 cmd_doctor() {
   request GET /auth/me "" 1
 }
@@ -295,20 +257,12 @@ cmd_api() {
 }
 
 cmd_mcp() {
-  local subcommand="${1:-}"
-  case "$subcommand" in
-    tools|list)
-      mcp_request tools
-      ;;
-    call)
-      local tool="${2:-}" args_json="${3:-{}}"
-      [[ -n "$tool" ]] || usage
-      mcp_request call "$tool" "$args_json"
-      ;;
-    *)
-      usage
-      ;;
-  esac
+  if ! command -v python3 >/dev/null 2>&1; then
+    print_error "Python 3.10+ is required for MCP. REST commands require bash and curl."
+    exit 1
+  fi
+  # The host profile reads only STREAMBRIDGE_HOST_TOKEN; never reuse a PAT.
+  STREAMBRIDGE_API_BASE="$API_BASE" python3 "$SCRIPT_DIR/mcp.py" "$@"
 }
 
 cmd_auth() {
@@ -384,10 +338,27 @@ cmd_events() {
   local action="${1:-}" id name
   shift || true
   case "$action" in
-    list) request GET /events ;;
+    list)
+      local query=() key
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --query|--page|--per-page|--sort|--event-type)
+            [[ $# -ge 2 ]] || usage
+            key="${1#--}"; key="${key//-/_}"
+            query+=("${key}=$(url_encode "$2")"); shift 2 ;;
+          *) usage ;;
+        esac
+      done
+      if [[ ${#query[@]} -gt 0 ]]; then
+        request GET "/events?$(IFS='&'; echo "${query[*]}")"
+      else
+        request GET /events
+      fi
+      ;;
     show) id="${1:-}"; [[ -n "$id" ]] || usage; request GET "/events/${id}" ;;
     create) name="$*"; [[ -n "$name" ]] || usage; request POST /events "$(printf '{"event":{"name":%s}}' "$(json_string "$name")")" ;;
     update) id="${1:-}"; shift || true; name="$*"; [[ -n "$id" && -n "$name" ]] || usage; request PATCH "/events/${id}" "$(printf '{"event":{"name":%s}}' "$(json_string "$name")")" ;;
+    prepare-live-show) id="${1:-}"; [[ -n "$id" ]] || usage; request POST "/events/${id}/programme" '{}' ;;
     delete) id="${1:-}"; [[ -n "$id" ]] || usage; request DELETE "/events/${id}" ;;
     *) usage ;;
   esac
@@ -428,7 +399,7 @@ cmd_streams() {
           *) usage ;;
         esac
       done
-      request POST /streams "$(printf '{"stream":{"event_id":%s,"name":%s,"protocol":%s,"publicly_visible":%s},"auto_start":%s}' "$(json_string "$event_id")" "$(json_string "$name")" "$(json_string "$protocol")" "$([[ "$publicly_visible" == "1" ]] && printf true || printf false)" "$([[ "$auto_start" == "1" ]] && printf true || printf false)")"
+      request POST /streams "$(printf '{"stream":{"event_id":%s,"name":%s,"protocol":%s,"publicly_visible":%s,"auto_start":%s}}' "$(json_string "$event_id")" "$(json_string "$name")" "$(json_string "$protocol")" "$([[ "$publicly_visible" == "1" ]] && printf true || printf false)" "$([[ "$auto_start" == "1" ]] && printf true || printf false)")"
       ;;
     update)
       id="${1:-}"; shift || true
@@ -442,6 +413,29 @@ cmd_streams() {
             payload+="\"name\":$(json_string "${2:-}")"
             first=0
             shift 2
+            ;;
+          --ad-tag)
+            [[ $# -ge 2 ]] || usage
+            [[ "$first" == "0" ]] && payload+=','
+            payload+="\"ad_tag\":$(json_string "$2")"
+            first=0; shift 2
+            ;;
+          --audio|--no-audio)
+            [[ "$first" == "0" ]] && payload+=','
+            if [[ "$1" == "--audio" ]]; then payload+='"public_audio_enabled":true'; else payload+='"public_audio_enabled":false'; fi
+            first=0; shift
+            ;;
+          --pin)
+            [[ $# -ge 3 ]] || usage
+            [[ "$2" =~ ^-?(0|[1-9][0-9]*)([.][0-9]+)?$ && "$3" =~ ^-?(0|[1-9][0-9]*)([.][0-9]+)?$ ]] || usage
+            [[ "$first" == "0" ]] && payload+=','
+            payload+="\"pinned_latitude\":$2,\"pinned_longitude\":$3"
+            first=0; shift 3
+            ;;
+          --clear-position)
+            [[ "$first" == "0" ]] && payload+=','
+            payload+='"pinned_latitude":null,"pinned_longitude":null'
+            first=0; shift
             ;;
           --protocol)
             [[ "$first" == "0" ]] && payload+=','
@@ -623,7 +617,10 @@ cmd_live() {
     switch-camera)
       local camera_identity="${1:-}"
       [[ -n "$camera_identity" ]] || usage
-      request POST "/events/${event_id}/live/featured_camera" "$(printf '{"camera_identity":%s}' "$(json_string "$camera_identity")")"
+      request POST "/events/${event_id}/live/featured_camera" "$(printf '{"participant_identity":%s}' "$(json_string "$camera_identity")")"
+      ;;
+    clear-camera)
+      request POST "/events/${event_id}/live/featured_camera" '{"participant_identity":null}'
       ;;
     notification)
       local title="${1:-}" message="" kind="" duration_ms="" icon=""
@@ -658,7 +655,7 @@ cmd_live() {
           *) usage ;;
         esac
       done
-      local payload="{\"overlay_id\":$(json_string "$overlay_id"),\"action\":$(json_string "$overlay_action")"
+      local payload="{\"overlay_id\":$(json_string "$overlay_id"),\"action_type\":$(json_string "$overlay_action")"
       [[ -n "$content" ]] && payload+=",\"content\":$(json_string "$content")"
       [[ -n "$position" ]] && payload+=",\"position\":$(json_string "$position")"
       [[ -n "$duration_ms" ]] && payload+=",\"duration_ms\":${duration_ms}"
@@ -1108,13 +1105,13 @@ Usage:
   bash scripts/streambridge doctor
   bash scripts/streambridge auth tokens list|create|delete ...
   bash scripts/streambridge api <METHOD> <PATH> [JSON]
-  bash scripts/streambridge mcp tools
-  bash scripts/streambridge mcp call <TOOL_NAME> [ARGS_JSON]
+  bash scripts/streambridge mcp [--profile legacy|host] tools
+  bash scripts/streambridge mcp [--profile legacy|host] call <TOOL_NAME> [ARGS_JSON]
   bash scripts/streambridge organizations list|show|switch ...
-  bash scripts/streambridge events list|show|create|update|delete ...
+  bash scripts/streambridge events list|show|create|update|prepare-live-show|delete ...
   bash scripts/streambridge streams list|show|create|update|start|stop|delete|invite|metrics ...
   bash scripts/streambridge page status|init|update|build|preview|render|live-url|files-list|file-read|file-write|file-replace|publish|versions|rollback ...
-  bash scripts/streambridge live switch-camera|notification|overlay|leaderboard|score|stats ...
+  bash scripts/streambridge live switch-camera|clear-camera|notification|overlay|leaderboard|score|stats ...
   bash scripts/streambridge feedback list|roadmap|show|create|update|delete|comment|comments|vote|unvote|follow|unfollow|status|priority|duplicate ...
   bash scripts/streambridge sponsors list|show|add|set|replace-asset|pause|resume|remove|import ...
   bash scripts/streambridge public viewer-token|invite|stream|device-session|livekit|telemetry|stream-metrics|leaderboard|results ...
@@ -1122,10 +1119,10 @@ Usage:
 Examples:
   bash scripts/streambridge doctor
   bash scripts/streambridge auth tokens create "Codex laptop" 2026-12-31T23:59:59Z
-  bash scripts/streambridge events create "School Rugby Finals"
-  bash scripts/streambridge streams create <event-id> "Touchline"
+  bash scripts/streambridge events create "Ridge Run"
+  bash scripts/streambridge streams create <event-id> "Finish Line"
   bash scripts/streambridge streams update <stream-id> --hidden|--public
-  bash scripts/streambridge page init <event-id> --prompt "Create a clean sports page"
+  bash scripts/streambridge page init <event-id> --prompt "Create a custom endurance event page"
   bash scripts/streambridge page files-list <event-id>
   bash scripts/streambridge live switch-camera <event-id> stream_<stream-id>
   bash scripts/streambridge feedback create --title "Lower third editor" --description "Need a reusable lower-third overlay"
@@ -1136,7 +1133,7 @@ Examples:
   bash scripts/streambridge api GET /organizations
   bash scripts/streambridge mcp call create_viewer_token '{"event_id":"...","viewer_name":"Viewer"}'
 EOF
-  exit 1
+  exit "${1:-2}"
 }
 
 main() {
@@ -1155,7 +1152,7 @@ main() {
     feedback) cmd_feedback "$@" ;;
     sponsors) cmd_sponsors "$@" ;;
     public) cmd_public "$@" ;;
-    help|-h|--help|"") usage ;;
+    help|-h|--help|"") usage 0 ;;
     *) usage ;;
   esac
 }

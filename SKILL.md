@@ -2,7 +2,6 @@
 name: streambridge
 description: Use StreamBridge from Claude Code, Codex, Manus, and other skills-compatible agents. Use it for events, cameras, invite links, viewer tokens, pages, live controls, feedback, and direct API or MCP access.
 license: Proprietary
-compatibility: Designed for skills-compatible agents. Requires bash, curl, and network access to StreamBridge. jq is optional for prettier JSON output.
 ---
 
 # StreamBridge
@@ -11,11 +10,16 @@ Use this skill when the user wants to create or run a StreamBridge event from an
 
 ## Default approach
 
-Prefer the bundled bash CLI in `scripts/streambridge` for real actions. Use the older Python helpers only when the one-shot scaffold is genuinely faster for the task.
+For a PAT-backed operator workflow, prefer the bundled Bash CLI in `scripts/streambridge`. Use the Python quickstart when one-shot setup is useful. For a scoped ChatGPT workflow, use the host MCP profile and its first-party invitation/OBS handoffs; keep its capability and credential boundaries.
+
+## Requirements
+
+Requires bash and curl for REST, Python 3.10+ for MCP or helpers, and network access. jq is optional except for sponsor name resolution and import.
 
 ## Setup
 
-Before substantial work:
+For general operator REST/MCP, verify auth before substantial work. The host
+profile instead requires its own issued OAuth grant and capability checks.
 
 1. If no saved token exists yet, the CLI asks for a StreamBridge API token on first run.
 2. The token is stored locally in `~/.streambridge/auth.json`.
@@ -23,18 +27,39 @@ Before substantial work:
 
 ## Golden path
 
-For a new event, prefer:
+StreamBridge hosts endurance sports. For a new event:
 
-1. Create the event and cameras with `bash scripts/streambridge ...` commands.
-2. Review the event, cameras, invite links, and preview URL
-3. Ask whether to publish unless the user explicitly requested publish
-4. If approved, run `bash scripts/streambridge page publish <event-id>`
+1. Create a named event. Its public map, featured stream, and chat page exists at `/v/<event-id>` immediately.
+2. Add camera slots (public by default) and retrieve invitations for the intended operators.
+3. Return the watch link and management link. Confirm actual media and current telemetry before claiming a camera is live.
+4. If the host requests an OBS show, prepare the optional programme with `events prepare-live-show <event-id>` and hand off to the event's OBS setup. Preparation does not start processing.
 
-If the user explicitly wants a one-shot scaffold, the optional helper is:
+Camera creation defaults to `auto_start=false`. Connect the phone or encoder to begin sending video; use `--start` only when processing startup is explicitly needed. A database status or successful setup command does not prove visible video.
+
+One-shot setup:
 
 ```bash
-python3 scripts/quickstart.py "<user intent>" --template <template>
+python3 scripts/quickstart.py "Ridge Run" --camera-name "Start" --camera-name "Finish"
 ```
+
+This returns camera invitations and public watch/manage URLs without starting processing or building a custom page. Set `STREAMBRIDGE_APP_URL` for a non-production frontend. If setup fails, use the returned partial resource IDs to finish the existing event instead of rerunning creation.
+
+## MCP profiles
+
+- `mcp tools` / `mcp call ...`: general operator tools at `/mcp`, using the saved PAT or `STREAMBRIDGE_API_TOKEN`. Responses can contain credentials.
+- `mcp --profile host tools` / `mcp --profile host call ...`: the 11 model-visible scoped host tools at `/mcp/chatgpt`, using **only** `STREAMBRIDGE_HOST_TOKEN`, an OAuth access token bound to that resource and one organization. A PAT cannot authorize this profile.
+
+The host profile is a gated pilot, with reads/writes disabled by default. ChatGPT uses account linking; the CLI's token override is for testing an issued grant. Do not request a PAT for ChatGPT account linking or imply the pilot is publicly available. Follow `references/API.md` for tool names, operation IDs, revisions, capabilities, and first-party handoffs.
+
+The host profile also includes a native ChatGPT sidebar app and conversation
+panel. `get_workspace_context` opens Event workspace; event/camera tools return
+the same safe data with a UI resource. Use the panel for event creation, camera
+editing and readiness, or use the same tools conversationally. The CLI remains
+text-only. Discovery also lists the UI-only `get_event_preview`; leave it to the
+embedded player and never copy its private `_meta` viewer credential into model
+context or logs. The panel previews one already-publishing source, muted by
+default, with no capture or stream-control permission. Invitation credentials and OBS setup still use protected first-party
+links. `embedded_ui=true` does not imply remote capture or verified video.
 
 ## Preferred commands
 
@@ -43,7 +68,7 @@ python3 scripts/quickstart.py "<user intent>" --template <template>
 - Cameras and streams: `bash scripts/streambridge streams ...`
   - Cameras are public by default; use `streams update <stream-id> --hidden`
     or `--public` to control public event page visibility.
-- Event pages and builds: `bash scripts/streambridge page ...`
+- Optional custom pages and builds: `bash scripts/streambridge page ...`
 - Live overlays and switching: `bash scripts/streambridge live ...`
 - Feedback: `bash scripts/streambridge feedback ...`
 - Sponsors (logos and banners on the viewer page): `bash scripts/streambridge sponsors ...`
@@ -102,14 +127,11 @@ Asset rules to respect when uploading:
 Important: tags must be unique among **active** sponsors per event. To
 re-use an `ad_tag`, `pause` or `remove` the previous sponsor first.
 
-## Publish rule
+## Optional custom pages
 
-Do not publish by default during setup unless:
+The default public event page needs no workspace build or publish call. The `page` commands manage the advanced custom page workspace, which requires Director access. Use it only when requested.
 
-- the user explicitly asked to publish, or
-- the script call includes `--publish`
-
-If setup reaches a ready state without publish, show the preview URL and ask whether to publish.
+`quickstart.py --custom-page` builds a custom preview. `--publish` explicitly builds and publishes that custom page; the compatibility flag `--no-publish` builds a preview only. Respect the user's existing publication authorization. Do not restart quickstart to publish an existing event; use `page publish <event-id>`.
 
 ## Output expectations
 
@@ -117,8 +139,8 @@ When reporting back, include:
 
 - event name and id
 - camera names
-- invite links or QR-ready URLs
-- preview URL or published URL
+- operator CLI: invitation links for intended camera operators; host MCP: protected invitation/OBS management handoffs
+- public watch and management URLs; custom preview/published URL if requested
 - blockers preventing live readiness
 
 ## Troubleshooting
@@ -128,14 +150,17 @@ If the CLI fails:
 1. read the exact API error
 2. run `bash scripts/streambridge doctor` if auth or API reachability may be involved
 3. prefer fixing the CLI path over falling back to the UI
-4. if the wrapper command does not exist yet, use `references/API.md` and call the REST or MCP endpoint directly
-5. only switch to manual UI steps if the CLI and direct API/MCP path are both genuinely blocked
+4. if a wrapper is missing, use `references/API.md` and the direct endpoint allowed by the existing grant
+5. use the first-party invitation/OBS handoff when the host profile returns one; this is its intended flow
+6. do not substitute a PAT or broader operator tools to bypass a host capability denial
 
 ## Gotchas
 
 - Prefer the bash CLI over the Python helpers for repeatable operations.
 - Use `references/API.md` when the CLI wrapper does not cover the exact endpoint.
-- Use `bash scripts/streambridge mcp tools` to inspect the live MCP tool list before assuming a tool exists.
+- Inspect the tool list in the intended MCP profile before assuming a tool exists.
+- REST base overrides: `STREAMBRIDGE_API_BASE` (preferred), `STREAMBRIDGE_API_BASE_URL`, or `STREAMBRIDGE_API_URL`; either origin or `/api/v1` URL is accepted. `STREAMBRIDGE_MCP_URL` overrides the selected profile endpoint.
+- The public GitHub skill and downloadable zip follow main publication and API deployment; a branch update is source verification only.
 
 ## References
 

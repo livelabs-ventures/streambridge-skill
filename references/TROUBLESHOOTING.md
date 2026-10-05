@@ -1,41 +1,51 @@
 # StreamBridge Skill Troubleshooting
 
-## `Unauthorized`
+## REST authentication or connection
 
-- Confirm the token you entered is valid
-- Confirm the token starts with `sb_pat_`
-- Run `bash scripts/streambridge doctor`
+Run `bash scripts/streambridge doctor`. Use a valid PAT from Settings > API Tokens,
+provided through `STREAMBRIDGE_API_TOKEN` or saved at `~/.streambridge/auth.json`.
+To replace a saved token, remove that file and run interactively again.
+REST base overrides accept an origin or `/api/v1` URL: `STREAMBRIDGE_API_BASE`,
+`STREAMBRIDGE_API_BASE_URL`, or `STREAMBRIDGE_API_URL` (in that precedence).
 
-## API connection failed
+## MCP failure
 
-- Run `bash scripts/streambridge doctor`
-- Check `STREAMBRIDGE_API_BASE` or `STREAMBRIDGE_API_URL` if you are not targeting production
-- Remove `~/.streambridge/auth.json` and rerun if you need to re-enter the token
+Python 3.10+ is required for MCP. `mcp` targets `/mcp` with the normal PAT.
+`mcp --profile host` targets `/mcp/chatgpt` with only `STREAMBRIDGE_HOST_TOKEN`.
+Check `STREAMBRIDGE_MCP_URL` if overriding either endpoint. Host grants require
+OAuth resource/organization binding, pilot entitlement and enabled read/write
+flags. A PAT or revoked grant yields 401; denied capabilities yield tool errors.
+The CLI exits nonzero for HTTP, JSON-RPC and tool errors, including SSE responses.
+After a timeout inspect state before retrying; reuse the same operation ID and
+arguments for a host mutation retry. Read fresh revisions after an edit conflict.
 
-## Publish failed
+## Setup succeeded but camera video is missing
 
-- Check `bash scripts/streambridge page status <event-id>`
-- Ensure the page has been built successfully first
+A camera slot, invitation or `active` status does not verify video. Open the
+management page, connect the phone/encoder and check actual media plus timestamps.
+Inspect `streams show <stream-id>` and metrics before explicitly starting
+processing. Quickstart creates slots without calling start by default.
 
-## Device-authenticated public commands failed
+## Quickstart failed partway through
 
-- Create a fresh device session with `bash scripts/streambridge public device-session <stream-key> <device-id>`
-- Pass the returned device token with `--device-token ...` or set `STREAMBRIDGE_DEVICE_TOKEN`
-- Retry `bash scripts/streambridge public livekit ...`, `telemetry ...`, or `stream-metrics ...`
+Output retains completed event/camera IDs. Continue those resources with the
+CLI; rerunning quickstart creates another event. An invitation failure does not
+mean camera creation failed. No writes are automatically retried.
 
-## Camera failed to start
+## Custom page publish failed
 
-- Inspect the stream with `bash scripts/streambridge streams show <stream-id>`
-- Retry the start command
+The default public page needs no publish call. For a requested custom page,
+verify Director access, `page status <event-id>`, a successful build and preview.
+Publish that existing event with `page publish <event-id>`.
 
-## CLI wrapper does not cover the operation
+## Device-authenticated commands
 
-- Use `references/API.md`
-- Call the REST endpoint with `bash scripts/streambridge api ...`
-- Or call MCP directly with `bash scripts/streambridge mcp ...`
+Create a fresh session with `public device-session <stream-key> <device-id>`.
+Use its device token with `--device-token` or `STREAMBRIDGE_DEVICE_TOKEN` for
+`public livekit`, `telemetry`, and `stream-metrics`. Keep tokens and invitation
+URLs with the intended operators.
 
-## One-shot helper stopped before publish
+## Operation missing from wrappers
 
-- That is the expected default behavior
-- Publish explicitly with `bash scripts/streambridge page publish <event-id>`
-- Or rerun the helper with `--publish`
+Read `API.md` and the applicable OpenAPI contract. Use `api <METHOD> <PATH> JSON`
+for current REST endpoints or discover tools in the correct MCP profile.

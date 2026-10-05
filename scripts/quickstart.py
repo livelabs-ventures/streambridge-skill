@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create an event, cameras, invites, and page setup in one flow."""
+"""Create an endurance event and camera slots; custom page setup is opt-in."""
 
 from __future__ import annotations
 
@@ -49,11 +49,13 @@ def create_page(client: StreamBridgeClient, event_id: str, description: str, tem
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run the StreamBridge quickstart flow")
     parser.add_argument("description", help="Describe the event you want to set up")
-    parser.add_argument("--template", choices=["sports", "race", "news"])
+    parser.add_argument("--template", choices=["sports", "race", "news"], default="race")
     parser.add_argument("--event-name")
-    parser.add_argument("--camera-count", type=int, default=3)
+    parser.add_argument("--camera-count", type=int, default=2)
     parser.add_argument("--camera-name", action="append", dest="camera_names")
-    parser.add_argument("--publish", action="store_true")
+    parser.add_argument("--start", action="store_true", help="Explicitly start camera processing")
+    parser.add_argument("--custom-page", action="store_true", help="Build an advanced custom page workspace")
+    parser.add_argument("--publish", action="store_true", help="Build and publish the custom page")
     parser.add_argument("--no-publish", action="store_true")
     args = parser.parse_args()
 
@@ -61,46 +63,41 @@ def main() -> int:
         print_json({"ok": False, "error": "Choose either --publish or --no-publish, not both"})
         return 1
 
+    if args.camera_count < 1:
+        parser.error("--camera-count must be positive")
     client = StreamBridgeClient()
     event_name = args.event_name or infer_event_name(args.description, args.template)
     camera_names = args.camera_names or default_camera_names(args.template, args.camera_count)
 
+    result: dict[str, Any] = {"ok": False, "streams": []}
     try:
         event = jsonapi_resource(client.create_event(event_name))
         event_id = event["id"]
-        streams = []
+        result.update({"event": event, **client.event_links(event_id)})
 
         for name in camera_names:
             stream = jsonapi_resource(client.create_stream(event_id, name))
-            started = jsonapi_resource(client.start_stream(stream["id"]))
-            invite = client.get_stream_invite(stream["id"])
-            streams.append(
-                {
-                    "stream": started,
-                    "invite": invite,
-                }
-            )
+            camera = {"stream": stream}
+            result["streams"].append(camera)
+            if args.start:
+                camera["stream"] = jsonapi_resource(client.start_stream(stream["id"]))
+            camera["invite"] = client.get_stream_invite(stream["id"])
 
-        page = jsonapi_resource(create_page(client, event_id, args.description, args.template))
-        build = client.build_workspace(event_id)
-        preview = client.preview_workspace(event_id)
-
-        result: dict[str, Any] = {
-            "event": event,
-            "streams": streams,
-            "page": page,
-            "build": build,
-            "preview": preview,
-            "publish_required_confirmation": not args.publish and not args.no_publish,
-        }
-
-        if args.publish:
-            result["published"] = jsonapi_resource(client.publish_event_page(event_id))
+        if args.custom_page or args.publish or args.no_publish:
+            result["page"] = jsonapi_resource(create_page(client, event_id, args.description, args.template))
+            result["build"] = client.build_workspace(event_id)
+            result["preview"] = client.preview_workspace(event_id)
+            result["publish_required_confirmation"] = not args.publish and not args.no_publish
+            if args.publish:
+                result["published"] = jsonapi_resource(client.publish_event_page(event_id))
+        result["ok"] = True
+        result["media_verified"] = False
 
         print_json(result)
         return 0
     except StreamBridgeError as exc:
-        print_json({"ok": False, "error": str(exc)})
+        result["error"] = str(exc)
+        print_json(result)
         return 1
 
 

@@ -136,7 +136,13 @@ def prompt_for_token() -> str | None:
 
 class StreamBridgeClient:
     def __init__(self, api_base: str | None = None, token: str | None = None) -> None:
-        self.api_base = (api_base or os.environ.get("STREAMBRIDGE_API_BASE") or DEFAULT_API_BASE).rstrip("/")
+        self.api_base = (
+            api_base or os.environ.get("STREAMBRIDGE_API_BASE")
+            or os.environ.get("STREAMBRIDGE_API_BASE_URL")
+            or os.environ.get("STREAMBRIDGE_API_URL") or DEFAULT_API_BASE
+        ).rstrip("/")
+        if not self.api_base.endswith("/api/v1"):
+            self.api_base += "/api/v1"
         self.token = token or os.environ.get("STREAMBRIDGE_API_TOKEN") or load_saved_token()
         self.token_source = "argument" if token else "environment" if os.environ.get("STREAMBRIDGE_API_TOKEN") else "local_settings" if self.token else None
 
@@ -163,6 +169,17 @@ class StreamBridgeClient:
 
     def create_event(self, name: str, is_default: bool = False) -> dict[str, Any]:
         return self.request("POST", "/events", {"event": {"name": name, "is_default": is_default}})
+
+    def prepare_live_show(self, event_id: str) -> dict[str, Any]:
+        return self.request("POST", f"/events/{event_id}/programme", {})
+
+    def event_links(self, event_id: str) -> dict[str, str]:
+        origin = self.api_base.removesuffix("/api/v1")
+        app = os.environ.get("STREAMBRIDGE_APP_URL") or (
+            "https://app.streambridge.live" if origin == "https://api.streambridge.live" else origin
+        )
+        app = app.rstrip("/")
+        return {"watch_url": f"{app}/v/{event_id}", "manage_url": f"{app}/events/{event_id}"}
 
     def list_streams(self, event_id: str | None = None) -> dict[str, Any]:
         query = ""
@@ -227,7 +244,7 @@ class StreamBridgeClient:
         return self.request(
             "POST",
             f"/events/{event_id}/live/featured_camera",
-            {"camera_identity": camera_identity},
+            {"participant_identity": camera_identity},
         )
 
     def send_notification(self, event_id: str, title: str, message: str | None = None) -> dict[str, Any]:

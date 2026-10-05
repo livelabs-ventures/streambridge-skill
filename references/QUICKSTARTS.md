@@ -1,60 +1,60 @@
 # StreamBridge Skill Quickstarts
 
-Run these after installing the skill. If you have not used it before, it will ask for your API token first.
+Run from the installed skill directory. First use prompts for a PAT.
 
-## Grassroots sports
-
-```bash
-bash scripts/streambridge events create "School Rugby Event"
-bash scripts/streambridge streams create <event-id> "Touchline" --start
-bash scripts/streambridge streams create <event-id> "Scoreboard" --start
-bash scripts/streambridge streams create <event-id> "Crowd" --start
-bash scripts/streambridge page init <event-id> --prompt "Create a school rugby event page with touchline, scoreboard, and crowd cameras"
-```
-
-Expected outcome:
-
-- event created
-- cameras created and started
-- invite links returned
-- preview URL returned
-- publish confirmation still under operator control
-
-## Endurance race
+## Endurance event
 
 ```bash
-bash scripts/streambridge events create "Ultra Trail"
-bash scripts/streambridge streams create <event-id> "Start" --start
-bash scripts/streambridge streams create <event-id> "Checkpoint" --start
-bash scripts/streambridge streams create <event-id> "Finish" --start
-bash scripts/streambridge page init <event-id> --prompt "Create a race page with start, checkpoint, finish, stats, and leaderboard sections" --starter-kit race
+python3 scripts/quickstart.py "Ridge Run" --camera-name "Start" --camera-name "Finish"
 ```
 
-Expected outcome:
+Creates a public event and two camera slots, retrieves authenticated invitations,
+and returns watch/manage URLs. It does not start processing or build a custom
+page. Connect the cameras, then inspect media and telemetry in StreamBridge.
+For a non-production app set `STREAMBRIDGE_APP_URL` to its frontend origin.
 
-- race-oriented event page prepared
-- camera invites returned
-- page preview available
-
-## Breaking news
+For separate commands:
 
 ```bash
-bash scripts/streambridge events create "Breaking News"
-bash scripts/streambridge streams create <event-id> "Field Camera 1" --start
-bash scripts/streambridge streams create <event-id> "Field Camera 2" --start
-bash scripts/streambridge page init <event-id> --prompt "Create a breaking news page with two field cameras and fast-switch layout" --starter-kit news
+bash scripts/streambridge events create "Ridge Run"
+bash scripts/streambridge streams create <event-id> "Start"
+bash scripts/streambridge streams create <event-id> "Finish"
+bash scripts/streambridge streams invite <stream-id>
 ```
 
-Expected outcome:
+The default viewer is `https://app.streambridge.live/v/<event-id>`.
+Management is `https://app.streambridge.live/events/<event-id>`.
 
-- rapid event setup
-- field camera invites returned
-- preview or publish-ready state reached quickly
-
-## One-shot helper
-
-If a single scaffold command is genuinely better for the task, the optional helper remains available:
+## Optional OBS show
 
 ```bash
-python3 scripts/quickstart.py "Create a breaking news event with three field cameras and prepare to publish" --template news
+bash scripts/streambridge events prepare-live-show <event-id>
 ```
+
+Idempotently prepares a programme, without starting processing. Open the event's
+OBS setup to configure the camera inputs and show output. A programme is separate
+from the source cameras and cannot receive a camera invitation.
+
+## Optional custom page (Director)
+
+```bash
+python3 scripts/quickstart.py "Ridge Run" --custom-page
+```
+
+Creates a new event, builds its custom page and returns a preview. Pass `--publish`
+only when publication is authorized. To publish an existing preview, use
+`bash scripts/streambridge page publish <event-id>`; do not rerun quickstart.
+The compatibility `--no-publish` flag also selects a custom preview.
+
+## ChatGPT pilot
+
+Use account linking for the host profile. The CLI can inspect an already issued
+pilot grant in `STREAMBRIDGE_HOST_TOKEN`:
+
+```bash
+bash scripts/streambridge mcp --profile host tools
+bash scripts/streambridge mcp --profile host call get_workspace_context '{}'
+```
+
+The feature is gated and disabled by default. PATs authorize the general operator
+CLI only. See `API.md` for the host schemas and first-party handoffs.

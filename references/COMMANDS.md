@@ -13,14 +13,11 @@ bash scripts/streambridge doctor
 ## Common operations
 
 ```bash
-bash scripts/streambridge events create "School Rugby Finals"
-bash scripts/streambridge streams create <event-id> "Touchline"
+bash scripts/streambridge events create "Ridge Run"
+bash scripts/streambridge streams create <event-id> "Finish Line"
 bash scripts/streambridge streams invite <stream-id>
-bash scripts/streambridge page init <event-id> --prompt "Create a clean sports page"
-bash scripts/streambridge page files-list <event-id>
-bash scripts/streambridge page build <event-id>
-bash scripts/streambridge page preview <event-id>
-bash scripts/streambridge page publish <event-id>
+# Public watch link: https://app.streambridge.live/v/<event-id>
+# Manage cameras and OBS: https://app.streambridge.live/events/<event-id>
 ```
 
 ## Auth tokens
@@ -43,9 +40,10 @@ bash scripts/streambridge organizations switch <organization-id>
 
 ```bash
 bash scripts/streambridge events create "Cape Epic"
-bash scripts/streambridge events list
+bash scripts/streambridge events list --query trail --per-page 100 --sort updated
 bash scripts/streambridge events show <event-id>
 bash scripts/streambridge events update <event-id> "Cape Epic Day 2"
+bash scripts/streambridge events prepare-live-show <event-id>
 bash scripts/streambridge events delete <event-id>
 ```
 
@@ -57,7 +55,9 @@ bash scripts/streambridge streams create <event-id> "Finish Line"
 bash scripts/streambridge streams create <event-id> "Private Moto" --hidden
 bash scripts/streambridge streams update <stream-id> --name "Finish Line A" --protocol srt
 bash scripts/streambridge streams update <stream-id> --hidden
-bash scripts/streambridge streams update <stream-id> --public
+bash scripts/streambridge streams update <stream-id> --public --audio
+bash scripts/streambridge streams update <stream-id> --pin -33.92 18.42 --ad-tag finish
+bash scripts/streambridge streams update <stream-id> --clear-position --no-audio
 bash scripts/streambridge streams show <stream-id>
 bash scripts/streambridge streams start <stream-id>
 bash scripts/streambridge streams stop <stream-id>
@@ -65,12 +65,18 @@ bash scripts/streambridge streams invite <stream-id>
 bash scripts/streambridge streams metrics <stream-id> --limit 50
 ```
 
-## Page
+Camera creation defaults to a slot without processing startup. Use `--start`
+only when explicitly needed. `prepare-live-show` creates/reuses one programme
+without starting it. Normal REST output can include publishing credentials.
+
+## Optional custom page (Director)
+
+The default public page already exists; these workspace commands are optional.
 
 ```bash
-bash scripts/streambridge page init <event-id> --prompt "Create a simple sports page"
+bash scripts/streambridge page init <event-id> --prompt "Create a custom race page"
 bash scripts/streambridge page status <event-id>
-bash scripts/streambridge page update <event-id> --prompt "Refine the sports layout"
+bash scripts/streambridge page update <event-id> --prompt "Refine the race layout"
 bash scripts/streambridge page files-list <event-id> --path src/components
 bash scripts/streambridge page file-read <event-id> src/App.tsx
 bash scripts/streambridge page file-write <event-id> src/data.json '{"title":"Final"}'
@@ -88,11 +94,14 @@ bash scripts/streambridge page rollback <event-id> 2
 
 ```bash
 bash scripts/streambridge live switch-camera <event-id> stream_<stream-id>
+bash scripts/streambridge live clear-camera <event-id>
 bash scripts/streambridge live notification <event-id> "Live now" --message "We are ready to go live"
-bash scripts/streambridge live overlay <event-id> lower-third show "Semi Final" --position top-left --duration-ms 3000 --animate true
+bash scripts/streambridge live overlay <event-id> lower-third show "Race leader" --position top-left --duration-ms 3000 --animate true
 bash scripts/streambridge live leaderboard <event-id> '[{"position":1,"athlete_name":"A. Runner"}]' --label "Overall" --tab-index 0
-bash scripts/streambridge live stats <event-id> '[{"label":"Possession","value":"62%"}]' "Match stats"
+bash scripts/streambridge live stats <event-id> '[{"label":"Distance","value":"42 km"}]' "Race stats"
 ```
+
+Only featured camera selection works without a published custom page.
 
 ## Feedback
 
@@ -186,7 +195,7 @@ bash scripts/streambridge public stream-metrics <stream-key> 4200 120 3 --packet
 
 ```bash
 bash scripts/streambridge api GET /organizations
-bash scripts/streambridge api POST /events '{"event":{"name":"School Rugby Finals"}}'
+bash scripts/streambridge api POST /events '{"event":{"name":"Ridge Run"}}'
 bash scripts/streambridge mcp tools
 bash scripts/streambridge mcp call create_viewer_token '{"event_id":"<event-id>","viewer_name":"Viewer"}'
 ```
@@ -196,5 +205,17 @@ bash scripts/streambridge mcp call create_viewer_token '{"event_id":"<event-id>"
 If you explicitly want the one-shot scaffold helper, keep using:
 
 ```bash
-python3 scripts/quickstart.py "Create a school rugby event with three cameras and a simple live page"
+python3 scripts/quickstart.py "Ridge Run" --camera-name "Start" --camera-name "Finish"
 ```
+
+## Host OAuth MCP (gated pilot)
+
+```bash
+bash scripts/streambridge mcp --profile host tools
+bash scripts/streambridge mcp --profile host call get_workspace_context '{}'
+```
+
+Requires `STREAMBRIDGE_HOST_TOKEN`, an issued OAuth grant for `/mcp/chatgpt`.
+See `API.md` for the 11 model-visible tools and their operation/revision contracts.
+Discovery also lists the UI-only preview tool; leave its credential to the player. PAT auth
+continues to apply to REST and the general `/mcp` profile.
