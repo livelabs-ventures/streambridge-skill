@@ -1229,7 +1229,10 @@ cmd_world() {
           --km|--lat|--lng)
             [[ "$2" =~ $number ]] || { print_error "$1 takes a number"; exit 1; }
             fields+=("\"${1#--}\":$2"); shift 2 ;;
-          --campaign) fields+=("\"campaign_id\":$(json_string "$(resolve_campaign_id "$event_id" "$2")")"); shift 2 ;;
+          --campaign)
+            # Its own assignment, so a campaign that isn't found stops here.
+            local campaign_id; campaign_id="$(resolve_campaign_id "$event_id" "$2")"
+            fields+=("\"campaign_id\":$(json_string "$campaign_id")"); shift 2 ;;
           --label)    fields+=("\"label\":$(json_string "$2")"); shift 2 ;;
           --note)     fields+=("\"note\":$(json_string "$2")"); shift 2 ;;
           --action)   fields+=("\"action\":$(json_string "$2")"); shift 2 ;;
