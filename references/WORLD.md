@@ -100,7 +100,7 @@ Viewers don't see:
 
 ## 3D sponsor props
 
-A sponsor can stand in the world as a 3D prop from our own library instead of a pin. The campaign's artwork goes on the prop: its mobile banner on an arch or a board, its logo on the others. Its marker floats above the prop, and pressing either one opens the sponsor card. Nobody uploads models; these five are the library.
+A sponsor can stand in the world as a 3D prop from our own library instead of a pin. The campaign's artwork goes on the prop: its mobile banner on a board, its logo on the others. Its marker floats above the prop, and pressing either one opens the sponsor card. Nobody uploads models; these five are the library.
 
 | `prop` | What it is | Where it goes |
 |---|---|---|
@@ -115,7 +115,7 @@ bash scripts/streambridge world place <event-id> --kind sponsor --campaign cell_
 bash scripts/streambridge world place <event-id> --kind sponsor --campaign cell_c --lat -34.048 --lng 18.4236 --prop podium --heading 120
 ```
 
-In a file, the element carries `"look": "prop", "prop": "arch"`. Keep props to the moments that matter: at most 24 per event, and well apart. A prop on a course stands beside the line (an arch straddles it) and faces along it.
+Props are landmark-sized: viewers see them when they zoom in or fly the route, and the sponsor's pill marks them from afar. In a file, the element carries `"look": "prop", "prop": "arch"`. Keep props to the moments that matter: at most 24 per event, and well apart. A prop on a course stands beside the line (an arch straddles it) and faces along it.
 
 ## Placing things well
 
