@@ -82,9 +82,12 @@ The second element has no `id`, so push creates it. `campaign_tag`, `route_key` 
 | `campaign_id` | Required for a `sponsor`, not allowed on other kinds. Must be one of the event's campaigns (`sponsors list`) |
 | `label` | Up to 40 characters. Required for points and hotspots; a sponsor shows its sponsor name when it has none |
 | `note` | Up to 280 characters |
+| `look` | `marker` (the default: a pin with a card) or `prop` (a 3D prop, below). Only sponsors take a prop |
+| `prop` | With `look: "prop"`: `arch`, `board`, `flag_line`, `inflatable` or `podium` |
+| `heading_deg` | For a prop at a point (`lat`/`lng`): the compass direction it faces, 0–359. On a course, a prop faces along it, so leave this out |
 | `visible` | `false` keeps the element in the layer but off the public page |
 
-At most 200 elements per event. Text shows as plain text.
+At most 200 elements per event, 24 of them props. Text shows as plain text.
 
 Sponsor artwork always comes from the campaign: the logo is the marker, and the click-through link is the card's Visit button. To change artwork or the link, use `sponsors set`. A paused campaign's placements disappear from the world until it resumes; deleting a campaign, course or camera deletes the elements that depend on it.
 
@@ -95,10 +98,29 @@ Viewers don't see:
 - a camera hotspot whose camera is hidden from the public page;
 - any element on a course whose world isn't ready.
 
+## 3D sponsor props
+
+A sponsor can stand in the world as a 3D prop from our own library instead of a pin. The campaign's artwork goes on the prop: its mobile banner on an arch or a board, its logo on the others. Its marker floats above the prop, and pressing either one opens the sponsor card. Nobody uploads models; these five are the library.
+
+| `prop` | What it is | Where it goes |
+|---|---|---|
+| `arch` | An inflatable arch over the course | The start (km 0.1) and the finish (a few hundred metres before `distance_km`). Runners pass through it |
+| `board` | A billboard beside the course | Climbs, aid stations, landmarks |
+| `flag_line` | A row of feather flags along the course | A long straight, or the run-in to the finish |
+| `inflatable` | A tall inflatable column | A spot spectators gather at, seen from far off |
+| `podium` | 1-2-3 steps | The finish area |
+
+```bash
+bash scripts/streambridge world place <event-id> --kind sponsor --campaign cell_c --course 42_km --km 0.1 --prop arch
+bash scripts/streambridge world place <event-id> --kind sponsor --campaign cell_c --lat -34.048 --lng 18.4236 --prop podium --heading 120
+```
+
+In a file, the element carries `"look": "prop", "prop": "arch"`. Keep props to the moments that matter: at most 24 per event, and well apart. A prop on a course stands beside the line (an arch straddles it) and faces along it.
+
 ## Placing things well
 
 - **Anchor to the course** (`route_key` + `km`) whenever the thing is on the course. A km anchor sits on the line and survives a corrected GPX; a lat/lng point doesn't follow the course.
-- **Sponsors:** the title sponsor at the start (km 0.1–0.3) and finish (a few hundred metres before `distance_km`). Others at aid stations, climbs or landmarks they're tied to, at least 2 km apart. One sponsor per spot.
+- **Sponsors:** the title sponsor at the start (km 0.1–0.3) and finish (a few hundred metres before `distance_km`), as arches. Others at aid stations, climbs or landmarks they're tied to, at least 2 km apart, as boards or markers. One sponsor per spot.
 - **Course points:** use the race's official aid, water and cut-off kilometres. Labels short and scannable: "Km 42 aid", "Cut-off 14:00", "Chapman's Peak".
 - **Hotspots:** a camera hotspot where a camera actually stands; a link only to a page that helps a spectator (route notes, results).
 - **Before a race, stage with `visible: false`,** check, then flip to true.

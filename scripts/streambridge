@@ -1238,6 +1238,10 @@ cmd_world() {
           --action)   fields+=("\"action\":$(json_string "$2")"); shift 2 ;;
           --camera)   fields+=("\"stream_id\":$(json_string "$2")"); shift 2 ;;
           --url)      fields+=("\"url\":$(json_string "$2")"); shift 2 ;;
+          --prop)     fields+=("\"look\":\"prop\"" "\"prop\":$(json_string "$2")"); shift 2 ;;
+          --heading)
+            [[ "$2" =~ $number ]] || { print_error "--heading takes a number"; exit 1; }
+            fields+=("\"heading_deg\":$2"); shift 2 ;;
           --hidden)   fields+=("\"visible\":false"); shift ;;
           *) usage ;;
         esac
@@ -1290,6 +1294,7 @@ Examples:
   bash scripts/streambridge world check <event-id> world.json
   bash scripts/streambridge world push <event-id> world.json
   bash scripts/streambridge world place <event-id> --kind sponsor --campaign cell_c --course 100_miler --km 10
+  bash scripts/streambridge world place <event-id> --kind sponsor --campaign cell_c --course 100_miler --km 0.1 --prop arch
   bash scripts/streambridge world place <event-id> --kind point --type water --course 100_miler --km 21.1 --label "Km 21 water"
   bash scripts/streambridge public device-session <stream-key> <device-id>
   bash scripts/streambridge api GET /organizations

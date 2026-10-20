@@ -131,7 +131,7 @@ re-use an `ad_tag`, `pause` or `remove` the previous sponsor first.
 
 ## The play world layer
 
-An event's course is shown as a 3D play world on its public page. The server builds the terrain; you place things in it: sponsor placements (a campaign's logo at a kilometre), course points (aid, water, cut-offs, climbs, landmarks) and hotspots that open a camera or a link. Viewers see changes live.
+An event's course is shown as a 3D play world on its public page. The server builds the terrain; you place things in it: sponsor placements (a campaign's logo at a kilometre, as a pin or a 3D prop such as an arch over the start), course points (aid, water, cut-offs, climbs, landmarks) and hotspots that open a camera or a link. Viewers see changes live.
 
 Read `references/WORLD.md` before editing a layer. The loop:
 
