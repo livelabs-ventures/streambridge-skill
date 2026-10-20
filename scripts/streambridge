@@ -1099,6 +1099,157 @@ cmd_public() {
   esac
 }
 
+require_jq() {
+  command -v jq >/dev/null 2>&1 && return 0
+  print_error "jq is required for this command; install jq (brew install jq)."
+  exit 1
+}
+
+# Fetch an authenticated JSON document without printing it, for lookups.
+fetch_json() {
+  ensure_token
+  curl -sS -X GET "${API_BASE%/}$1" -H "Accept: application/json" -H "Authorization: Bearer ${TOKEN}"
+}
+
+# A course reference (its id or its key) as the course's id.
+resolve_route_id() {
+  local event_id="$1" key="$2"
+  if is_uuid "$key"; then
+    printf '%s' "$key"
+    return 0
+  fi
+  require_jq
+  local body id
+  body="$(fetch_json "/events/${event_id}/routes")"
+  id="$(printf '%s' "$body" | jq -r --arg key "$key" '.data | map(select(.route_key == $key)) | .[0].id // empty')"
+  if [[ -z "$id" ]]; then
+    print_error "No course \"$key\" on event $event_id. Courses:"
+    printf '%s' "$body" | jq -r '.data[]? | "  - \(.route_key) (\(.name), id: \(.id))"' >&2 || true
+    exit 1
+  fi
+  printf '%s' "$id"
+}
+
+# A campaign reference (its id, its tag or its sponsor's name) as the campaign's id. An
+# active campaign wins over a paused one with the same tag.
+resolve_campaign_id() {
+  local event_id="$1" key="$2"
+  if is_uuid "$key"; then
+    printf '%s' "$key"
+    return 0
+  fi
+  require_jq
+  local body id
+  body="$(fetch_json "/events/${event_id}/campaigns")"
+  id="$(printf '%s' "$body" | jq -r --arg key "$key" '
+    (.data // []) as $all
+    | ($all | map(select(.attributes.tag == $key)) | sort_by(.attributes.active | not) | .[0].id)
+      // ($all | map(select((.attributes.sponsor_name // "" | ascii_downcase) == ($key | ascii_downcase))) | .[0].id)
+      // empty
+  ')"
+  if [[ -z "$id" ]]; then
+    print_error "No campaign tagged or named \"$key\" on event $event_id. Campaigns:"
+    printf '%s' "$body" | jq -r '.data[]? | "  - \(.attributes.tag): \(.attributes.sponsor_name) (id: \(.id))"' >&2 || true
+    exit 1
+  fi
+  printf '%s' "$id"
+}
+
+# The {version, elements} document from a file: a `world pull` file, or a whole API response.
+world_document() {
+  local file="$1"
+  [[ -f "$file" ]] || { print_error "No file at $file"; exit 1; }
+  require_jq
+  jq -ce 'if has("data") then .data else . end | {version, elements}' "$file" 2>/dev/null || {
+    print_error "$file isn't a world layer document ({\"version\": n, \"elements\": [...]})."
+    exit 1
+  }
+}
+
+cmd_courses() {
+  local action="${1:-}"; shift || true
+  case "$action" in
+    list)
+      local event_id="${1:-}"
+      [[ -n "$event_id" ]] || usage
+      request GET "/events/${event_id}/routes"
+      ;;
+    rebuild-world)
+      local event_id="${1:-}" key="${2:-}"
+      [[ -n "$event_id" && -n "$key" ]] || usage
+      local route_id; route_id="$(resolve_route_id "$event_id" "$key")"
+      request POST "/events/${event_id}/routes/${route_id}/world/rebuild" '{}'
+      ;;
+    *) usage ;;
+  esac
+}
+
+# The event's world layer: sponsor placements, course points and hotspots drawn in its play
+# world (docs/features/play-world-layer.md). Edit as a file (pull, check, push) or one at a time.
+cmd_world() {
+  local action="${1:-}"; shift || true
+  case "$action" in
+    pull)
+      local event_id="${1:-}" file="${2:-}"
+      [[ -n "$event_id" ]] || usage
+      require_jq
+      ensure_token
+      local body
+      body="$(curl -sS -f -X GET "${API_BASE%/}/events/${event_id}/world" -H "Accept: application/json" -H "Authorization: Bearer ${TOKEN}")" || {
+        print_error "Couldn't read the world layer of event $event_id."
+        exit 1
+      }
+      if [[ -n "$file" ]]; then
+        printf '%s' "$body" | jq '.data' > "$file"
+        print_error "Wrote version $(jq -r '.version' "$file") with $(jq '.elements | length' "$file") elements to $file"
+      else
+        printf '%s' "$body" | jq '.data'
+      fi
+      ;;
+    check|push)
+      local event_id="${1:-}" file="${2:-}"
+      [[ -n "$event_id" && -n "$file" ]] || usage
+      local query=""
+      [[ "$action" == "check" ]] && query="?dry_run=true"
+      request PUT "/events/${event_id}/world${query}" "$(world_document "$file")"
+      ;;
+    place)
+      local event_id="${1:-}"
+      [[ -n "$event_id" ]] || usage
+      shift || true
+      local fields=() number='^-?[0-9]+(\.[0-9]+)?$'
+      while [[ $# -gt 0 ]]; do
+        [[ $# -ge 2 || "$1" == "--hidden" ]] || usage
+        case "$1" in
+          --kind)     fields+=("\"kind\":$(json_string "$2")"); shift 2 ;;
+          --type)     fields+=("\"point_type\":$(json_string "$2")"); shift 2 ;;
+          --course)
+            if is_uuid "$2"; then fields+=("\"route_id\":$(json_string "$2")"); else fields+=("\"route_key\":$(json_string "$2")"); fi
+            shift 2 ;;
+          --km|--lat|--lng)
+            [[ "$2" =~ $number ]] || { print_error "$1 takes a number"; exit 1; }
+            fields+=("\"${1#--}\":$2"); shift 2 ;;
+          --campaign) fields+=("\"campaign_id\":$(json_string "$(resolve_campaign_id "$event_id" "$2")")"); shift 2 ;;
+          --label)    fields+=("\"label\":$(json_string "$2")"); shift 2 ;;
+          --note)     fields+=("\"note\":$(json_string "$2")"); shift 2 ;;
+          --action)   fields+=("\"action\":$(json_string "$2")"); shift 2 ;;
+          --camera)   fields+=("\"stream_id\":$(json_string "$2")"); shift 2 ;;
+          --url)      fields+=("\"url\":$(json_string "$2")"); shift 2 ;;
+          --hidden)   fields+=("\"visible\":false"); shift ;;
+          *) usage ;;
+        esac
+      done
+      request POST "/events/${event_id}/world/elements" "{$(IFS=,; echo "${fields[*]}")}"
+      ;;
+    remove)
+      local event_id="${1:-}" element_id="${2:-}"
+      [[ -n "$event_id" && -n "$element_id" ]] || usage
+      request DELETE "/events/${event_id}/world/elements/${element_id}"
+      ;;
+    *) usage ;;
+  esac
+}
+
 usage() {
   cat <<'EOF'
 Usage:
@@ -1114,6 +1265,8 @@ Usage:
   bash scripts/streambridge live switch-camera|clear-camera|notification|overlay|leaderboard|score|stats ...
   bash scripts/streambridge feedback list|roadmap|show|create|update|delete|comment|comments|vote|unvote|follow|unfollow|status|priority|duplicate ...
   bash scripts/streambridge sponsors list|show|add|set|replace-asset|pause|resume|remove|import ...
+  bash scripts/streambridge courses list|rebuild-world ...
+  bash scripts/streambridge world pull|check|push|place|remove ...
   bash scripts/streambridge public viewer-token|invite|stream|device-session|livekit|telemetry|stream-metrics|leaderboard|results ...
 
 Examples:
@@ -1129,6 +1282,12 @@ Examples:
   bash scripts/streambridge sponsors add <event-id> "Cell C" --on start_line --link https://cellc.co.za/comrades --logo cellc.svg --mobile cellc-mobile.png --pillar cellc-pillar.png
   bash scripts/streambridge sponsors set  <event-id> "Cell C" --logo new-logo.svg
   bash scripts/streambridge sponsors pause <event-id> "Cell C"
+  bash scripts/streambridge courses rebuild-world <event-id> 100_miler
+  bash scripts/streambridge world pull <event-id> world.json
+  bash scripts/streambridge world check <event-id> world.json
+  bash scripts/streambridge world push <event-id> world.json
+  bash scripts/streambridge world place <event-id> --kind sponsor --campaign cell_c --course 100_miler --km 10
+  bash scripts/streambridge world place <event-id> --kind point --type water --course 100_miler --km 21.1 --label "Km 21 water"
   bash scripts/streambridge public device-session <stream-key> <device-id>
   bash scripts/streambridge api GET /organizations
   bash scripts/streambridge mcp call create_viewer_token '{"event_id":"...","viewer_name":"Viewer"}'
@@ -1151,6 +1310,8 @@ main() {
     live) cmd_live "$@" ;;
     feedback) cmd_feedback "$@" ;;
     sponsors) cmd_sponsors "$@" ;;
+    courses) cmd_courses "$@" ;;
+    world) cmd_world "$@" ;;
     public) cmd_public "$@" ;;
     help|-h|--help|"") usage 0 ;;
     *) usage ;;

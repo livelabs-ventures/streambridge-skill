@@ -187,6 +187,22 @@ Multipart fields (all optional on PATCH; `sponsor_name`, `tag`, and
 | `banner_mobile` | file | ≤2 MB. png, jpg, webp. Wide aspect (~2.7:1), left-anchored. |
 | `banner_pillar` | file | ≤5 MB. png, jpg, webp. Portrait, full-bleed. |
 
+### Courses and the play world layer
+
+The world layer is what an event's play world shows over its terrain: sponsor
+placements, course points and hotspots. The CLI exposes it as
+`bash scripts/streambridge courses ...` and `bash scripts/streambridge world ...`;
+`WORLD.md` has the element rules.
+
+- `GET /events/:event_id/routes`: courses with `world_status`, `world_error`, `world_built_at`, `world_url`
+- `POST /events/:event_id/routes/:id/world/rebuild`: `202`; `409` when the course isn't parsed; `422` (`unavailable`) where worlds aren't built
+- `GET /events/:event_id/world`: `{data: {version, elements}}`
+- `PUT /events/:event_id/world`: body `{version, elements}`; replaces the layer; `?dry_run=true` checks without saving; `409` (`version_conflict`, with `current_version`) when the layer changed since `version`; `422` lists `elements[n].field` errors
+- `POST /events/:event_id/world/elements`: one element
+- `PATCH /events/:event_id/world/elements/:id`
+- `DELETE /events/:event_id/world/elements/:id`
+- `GET /public/events/:event_id/world`: the public layer (visible elements, active campaigns, public cameras)
+
 ### Public device and viewer endpoints
 
 - `POST /public/events/:event_id/viewer_token`
@@ -284,6 +300,11 @@ The MCP tool set is narrower than the full REST API. When a route is not exposed
 - `get_stream_invite_url`
 - `get_stream_metrics`
 - `create_viewer_token`
+- `get_event_world`
+- `place_world_element`
+- `update_world_element`
+- `remove_world_element`
+- `rebuild_course_world`
 
 ## Host MCP tools (`/mcp/chatgpt`)
 

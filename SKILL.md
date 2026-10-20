@@ -1,6 +1,6 @@
 ---
 name: streambridge
-description: Use StreamBridge from Claude Code, Codex, Manus, and other skills-compatible agents. Use it for events, cameras, invite links, viewer tokens, pages, live controls, feedback, and direct API or MCP access.
+description: Use StreamBridge from Claude Code, Codex, Manus, and other skills-compatible agents. Use it for events, cameras, invite links, viewer tokens, pages, live controls, sponsors, the play world layer (sponsor placements, course points and hotspots in an event's 3D world), feedback, and direct API or MCP access.
 license: Proprietary
 ---
 
@@ -72,6 +72,8 @@ links. `embedded_ui=true` does not imply remote capture or verified video.
 - Live overlays and switching: `bash scripts/streambridge live ...`
 - Feedback: `bash scripts/streambridge feedback ...`
 - Sponsors (logos and banners on the viewer page): `bash scripts/streambridge sponsors ...`
+- Courses and their play worlds: `bash scripts/streambridge courses ...`
+- The play world layer (sponsor placements, course points, hotspots): `bash scripts/streambridge world ...`
 - Direct REST fallback: `bash scripts/streambridge api <METHOD> <PATH> '<json>'`
 - Direct MCP fallback: `bash scripts/streambridge mcp call <tool> '<json>'`
 
@@ -127,6 +129,23 @@ Asset rules to respect when uploading:
 Important: tags must be unique among **active** sponsors per event. To
 re-use an `ad_tag`, `pause` or `remove` the previous sponsor first.
 
+## The play world layer
+
+An event's course is shown as a 3D play world on its public page. The server builds the terrain; you place things in it: sponsor placements (a campaign's logo at a kilometre), course points (aid, water, cut-offs, climbs, landmarks) and hotspots that open a camera or a link. Viewers see changes live.
+
+Read `references/WORLD.md` before editing a layer. The loop:
+
+```bash
+bash scripts/streambridge courses list <event-id>              # course keys, distances, world status
+bash scripts/streambridge sponsors list <event-id>             # campaigns to place
+bash scripts/streambridge world pull <event-id> world.json
+# edit world.json
+bash scripts/streambridge world check <event-id> world.json
+bash scripts/streambridge world push <event-id> world.json
+```
+
+Anchor to a course and kilometre whenever you can. Report what you placed (kind, label, course and km) and any course whose world isn't `ready` (its elements won't show until it is).
+
 ## Optional custom pages
 
 The default public event page needs no workspace build or publish call. The `page` commands manage the advanced custom page workspace, which requires Director access. Use it only when requested.
@@ -168,3 +187,4 @@ If the CLI fails:
 - `references/COMMANDS.md`
 - `references/QUICKSTARTS.md`
 - `references/TROUBLESHOOTING.md`
+- `references/WORLD.md`

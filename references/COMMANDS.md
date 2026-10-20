@@ -180,6 +180,24 @@ Manifest shape (`sponsors.json`):
 }
 ```
 
+## Courses and the play world layer
+
+See `WORLD.md` for the file format, the rules and placement guidance.
+
+```bash
+bash scripts/streambridge courses list <event-id>
+bash scripts/streambridge courses rebuild-world <event-id> <course-key-or-id>
+bash scripts/streambridge world pull <event-id> world.json
+bash scripts/streambridge world check <event-id> world.json
+bash scripts/streambridge world push <event-id> world.json
+bash scripts/streambridge world place <event-id> --kind sponsor --campaign <tag|name|id> --course <key> --km 0.2
+bash scripts/streambridge world place <event-id> --kind point --type aid --course <key> --km 42 --label "Km 42 aid"
+bash scripts/streambridge world place <event-id> --kind hotspot --action camera --camera <stream-id> --lat -33.95 --lng 18.41 --label "Summit cam"
+bash scripts/streambridge world remove <event-id> <element-id>
+```
+
+`world place` flags: `--kind`, `--type`, `--course`, `--km`, `--lat`, `--lng`, `--campaign`, `--label`, `--note`, `--action`, `--camera`, `--url`, `--hidden`.
+
 ## Public device and viewer flows
 
 ```bash
