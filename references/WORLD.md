@@ -100,7 +100,7 @@ Viewers don't see:
 
 ## 3D sponsor props
 
-A sponsor can stand in the world as a 3D prop from our own library instead of a pin. The campaign's artwork goes on the prop: its mobile banner on a board, its logo on the others. Its marker floats above the prop, and pressing either one opens the sponsor card. Nobody uploads models; these five are the library.
+A sponsor can stand in the world as a 3D prop from our own library instead of a pin. The campaign's artwork goes on the prop: its mobile banner on a board, its logo on the others. Its marker floats above the prop, and pressing either one opens the sponsor card. Nobody uploads models; these six are the library.
 
 | `prop` | What it is | Where it goes |
 |---|---|---|
@@ -109,6 +109,7 @@ A sponsor can stand in the world as a 3D prop from our own library instead of a 
 | `flag_line` | A row of feather flags along the course | A long straight, or the run-in to the finish |
 | `inflatable` | A tall inflatable column | A spot spectators gather at, seen from far off |
 | `podium` | 1-2-3 steps | The finish area |
+| `airship` | A blocky zeppelin in the sponsor's colour (taken from its logo), with the logo on both sides, circling high over its anchor | Over the whole race: anchor it near the middle of the course. One per event |
 
 ```bash
 bash scripts/streambridge world place <event-id> --kind sponsor --campaign cell_c --course 42_km --km 0.1 --prop arch

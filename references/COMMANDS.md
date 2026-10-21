@@ -196,7 +196,7 @@ bash scripts/streambridge world place <event-id> --kind hotspot --action camera 
 bash scripts/streambridge world remove <event-id> <element-id>
 ```
 
-`world place` flags: `--kind`, `--type`, `--course`, `--km`, `--lat`, `--lng`, `--campaign`, `--label`, `--note`, `--action`, `--camera`, `--url`, `--prop` (`arch`, `board`, `flag_line`, `inflatable`, `podium`; a sponsor as a 3D prop), `--heading` (degrees, for a prop at a point), `--hidden`.
+`world place` flags: `--kind`, `--type`, `--course`, `--km`, `--lat`, `--lng`, `--campaign`, `--label`, `--note`, `--action`, `--camera`, `--url`, `--prop` (`arch`, `board`, `flag_line`, `inflatable`, `podium`, `airship`; a sponsor as a 3D prop), `--heading` (degrees, for a prop at a point), `--hidden`.
 
 ## Public device and viewer flows
 
