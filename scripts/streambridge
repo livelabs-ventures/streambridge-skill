@@ -1414,15 +1414,18 @@ cmd_athletes() {
       fi
       ;;
     trackers)
-      local query="limit=1000"
+      # A page of at most 1,000; a full page means pass --offset for the next.
+      local limit="1000" offset="0" filters=""
       while [[ $# -gt 0 ]]; do
         case "$1" in
-          --unassigned) query+="&unassigned=true"; shift ;;
-          --source) query+="&source_key=$(url_encode "${2:-}")"; shift 2 ;;
+          --limit) limit="${2:-}"; shift 2 ;;
+          --offset) offset="${2:-}"; shift 2 ;;
+          --unassigned) filters+="&unassigned=true"; shift ;;
+          --source) filters+="&source_key=$(url_encode "${2:-}")"; shift 2 ;;
           *) usage ;;
         esac
       done
-      request GET "/events/${event_id}/trackers?${query}"
+      request GET "/events/${event_id}/trackers?limit=$(url_encode "$limit")&offset=$(url_encode "$offset")${filters}"
       ;;
     assign)
       # What one tracker stands for: an athlete (--bib or --athlete), a camera
