@@ -203,6 +203,22 @@ placements, course points and hotspots. The CLI exposes it as
 - `DELETE /events/:event_id/world/elements/:id`
 - `GET /public/events/:event_id/world`: the public layer (visible elements, active campaigns, public cameras)
 
+### Athletes and trackers
+
+An event's roster and the trackers that place athletes (and cameras that
+aren't on the Stream app) on its map. A race is one of the event's courses.
+Hosts only; reads need `events_read`, writes `events_write`.
+
+- `GET /events/:event_id/athletes`: the roster by bib (`limit`, `offset`; `meta.total`), each with `trackers` and newest `location`
+- `POST /events/:event_id/athletes`: one athlete: `name`, `bib`, `gender` (`female`/`male`, or `F`/`W`/`M`), `route_key` or `route_id`, `external_ref`, `hidden`, `tracker_ref` (+ `source_key` when there are several tracking sources)
+- `POST /events/:event_id/athletes/batch`: body `{athletes: [rows]}`, at most 1,000; a row matches by `id`, then `bib`, then `external_ref`, else is added; each row is answered (`created`, `updated` or `error` with `errors`)
+- `PATCH /events/:event_id/athletes/:id`, `DELETE /events/:event_id/athletes/:id`
+- `PUT /events/:event_id/athletes/:id/photo`: multipart `photo` (png, jpg, webp, ≤5 MB); `DELETE` removes it
+- `GET /events/:event_id/trackers`: `unassigned=true`, `source_key`, `limit`, `offset`
+- `PATCH /events/:event_id/trackers/:id`: `{athlete_id}`, `{bib}` or `{stream_id}`; none of them unassigns
+- `POST /events/:event_id/trackers/assign`: body `{assignments: [{tracker_id | tracker_ref (+ source_key), athlete_id | bib | stream_id}]}`; a `tracker_ref` that hasn't reported yet is registered
+- Tracking sources are data sources: `POST /events/:event_id/destination/data-sources` with `adapter_key: "lnx"` answers a `webhook_url` for the provider; `GET …/data-sources/:id/webhook-deliveries` shows what it posted
+
 ### Public device and viewer endpoints
 
 - `POST /public/events/:event_id/viewer_token`
@@ -305,6 +321,11 @@ The MCP tool set is narrower than the full REST API. When a route is not exposed
 - `update_world_element`
 - `remove_world_element`
 - `rebuild_course_world`
+- `get_event_athletes`
+- `upsert_athletes`
+- `remove_athletes`
+- `assign_trackers`
+- `add_tracking_source`
 
 ## Host MCP tools (`/mcp/chatgpt`)
 
