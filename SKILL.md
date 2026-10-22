@@ -1,6 +1,6 @@
 ---
 name: streambridge
-description: Use StreamBridge from Claude Code, Codex, Manus, and other skills-compatible agents. Use it for events, cameras, invite links, viewer tokens, pages, live controls, sponsors, the play world layer (sponsor placements, course points and hotspots in an event's 3D world), feedback, and direct API or MCP access.
+description: Use StreamBridge from Claude Code, Codex, Manus, and other skills-compatible agents. Use it for events, cameras, invite links, viewer tokens, pages, live controls, sponsors, the play world layer (sponsor placements, course points and hotspots in an event's 3D world), athletes and trackers (the roster, start-list imports, athlete photos, LNX tracking and who each tracker places on the map), feedback, and direct API or MCP access.
 license: Proprietary
 ---
 
@@ -14,7 +14,7 @@ For a PAT-backed operator workflow, prefer the bundled Bash CLI in `scripts/stre
 
 ## Requirements
 
-Requires bash and curl for REST, Python 3.10+ for MCP or helpers, and network access. jq is optional except for sponsor name resolution and import.
+Requires bash and curl for REST, Python 3.10+ for MCP or helpers, and network access. jq is optional except for sponsor name resolution and import, finding an athlete by bib, and athlete import.
 
 ## Setup
 
@@ -74,6 +74,7 @@ links. `embedded_ui=true` does not imply remote capture or verified video.
 - Sponsors (logos and banners on the viewer page): `bash scripts/streambridge sponsors ...`
 - Courses and their play worlds: `bash scripts/streambridge courses ...`
 - The play world layer (sponsor placements, course points, hotspots): `bash scripts/streambridge world ...`
+- Athletes and trackers (roster, start-list import, photos, LNX tracking): `bash scripts/streambridge athletes ...`
 - Direct REST fallback: `bash scripts/streambridge api <METHOD> <PATH> '<json>'`
 - Direct MCP fallback: `bash scripts/streambridge mcp call <tool> '<json>'`
 
@@ -146,6 +147,27 @@ bash scripts/streambridge world push <event-id> world.json
 
 Anchor to a course and kilometre whenever you can. Report what you placed (kind, label, course and km) and any course whose world isn't `ready` (its elements won't show until it is).
 
+## Athletes and trackers
+
+An event's roster is who is racing: name, bib, gender, race (one of the event's courses, by its key from `courses list`) and photo. Trackers place athletes on the public map; a tracker can also carry a camera that isn't on the Stream app. Today's tracking provider is LNX, which posts positions to a webhook URL.
+
+Every athlete verb takes an athlete id or a bib, so answer "hide bib 101" or "swap Anna's photo" without asking for a uuid.
+
+```bash
+bash scripts/streambridge courses list <event-id>                       # race keys for --race
+bash scripts/streambridge athletes connect <event-id> lnx               # first, for tracker ids; the webhook URL to give LNX (needs Python)
+bash scripts/streambridge athletes import <event-id> roster.json        # start list: [{name, bib, gender, route_key, external_ref, tracker_ref}]
+bash scripts/streambridge athletes add <event-id> "Anna Smit" --bib 101 --gender F --race full --tracker LNX-0042
+bash scripts/streambridge athletes set <event-id> 101 --hidden          # on the roster, off the public page
+bash scripts/streambridge athletes photo <event-id> 101 anna.jpg        # png, jpg or webp, at most 5 MB; --remove takes it away
+bash scripts/streambridge athletes remove <event-id> 101
+bash scripts/streambridge athletes list <event-id>                      # by bib, with trackers and newest position
+bash scripts/streambridge athletes trackers <event-id> --unassigned     # trackers reporting for no one yet
+bash scripts/streambridge athletes assign <event-id> LNX-0042 --bib 101 # or --athlete <id>, --camera <stream-id>, --none
+```
+
+Import is idempotent: a row matches by `id`, then `bib`, then `external_ref`, so importing a corrected list again updates it. Convert a CSV start list to that JSON first. Each row is answered on its own; report the created and updated counts and every row in error with its reasons. Connect the tracking source before giving athletes tracker ids: until then a row with `tracker_ref` is refused ("The event has no tracking source yet"). A tracker id that hasn't reported yet can still be assigned. The webhook URL is a credential: give it only to the tracking provider. A tracker only places an athlete once it reports; don't claim an athlete is on the map until `athletes list` shows a `location`.
+
 ## Optional custom pages
 
 The default public event page needs no workspace build or publish call. The `page` commands manage the advanced custom page workspace, which requires Director access. Use it only when requested.
@@ -178,6 +200,7 @@ If the CLI fails:
 - Prefer the bash CLI over the Python helpers for repeatable operations.
 - Use `references/API.md` when the CLI wrapper does not cover the exact endpoint.
 - Inspect the tool list in the intended MCP profile before assuming a tool exists.
+- An account made a manager of another organization's event reaches that event through the CLI and general MCP: `events list` and `list_events` show it with `access: "manager"`. A manager can run its cameras, roster, world and live show, but can't delete it or create events in that organization.
 - REST base overrides: `STREAMBRIDGE_API_BASE` (preferred), `STREAMBRIDGE_API_BASE_URL`, or `STREAMBRIDGE_API_URL`; either origin or `/api/v1` URL is accepted. `STREAMBRIDGE_MCP_URL` overrides the selected profile endpoint.
 - The public GitHub skill and downloadable zip follow main publication and API deployment; a branch update is source verification only.
 

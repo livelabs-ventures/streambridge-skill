@@ -29,7 +29,7 @@ bash scripts/streambridge doctor
 The CLI prompts for a personal access token on first use and stores it in `~/.streambridge/auth.json`.
 
 REST commands require Bash and curl. MCP and Python helpers require Python 3.10+.
-`jq` is optional for JSON display, but required for sponsor name lookup/import.
+`jq` is optional for JSON display, but required for sponsor name lookup/import and athlete bib lookup/import.
 The default flow creates a public endurance event and camera slots; custom page
 build/publish and processing startup are explicit options. See the references.
 The host MCP pilot uses resource-bound OAuth, not the normal PAT, and is disabled

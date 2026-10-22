@@ -118,7 +118,10 @@ request_with_headers() {
   if [[ "$require_auth" == "1" ]]; then
     curl_args+=(-H "Authorization: Bearer ${TOKEN}")
   fi
-  curl_args+=("${extra_headers[@]}")
+  # macOS's bash 3.2 calls an empty array unbound under `set -u`.
+  if [[ ${#extra_headers[@]} -gt 0 ]]; then
+    curl_args+=("${extra_headers[@]}")
+  fi
   if [[ -n "$payload" ]]; then
     curl_args+=(-H "Content-Type: application/json" -d "$payload")
   fi
@@ -1257,6 +1260,212 @@ cmd_world() {
   esac
 }
 
+# Resolve an athlete reference to its id: a uuid (returned verbatim) or a bib,
+# looked up on the event's roster a page at a time. Prints the id on stdout or
+# exits non-zero.
+resolve_athlete_id() {
+  local event_id="$1" key="$2"
+  if is_uuid "$key"; then
+    printf '%s' "$key"
+    return 0
+  fi
+  if ! command -v jq >/dev/null 2>&1; then
+    print_error "jq is required to find an athlete by bib; install jq or pass the athlete id."
+    exit 1
+  fi
+  ensure_token
+  local offset=0 page id count
+  while :; do
+    page="$(curl -sS -X GET "${API_BASE%/}/events/${event_id}/athletes?limit=1000&offset=${offset}" \
+      -H "Accept: application/json" \
+      -H "Authorization: Bearer ${TOKEN}")"
+    id="$(printf '%s' "$page" | jq -r --arg bib "$key" '[.data[]? | select((.bib // "" | tostring) == $bib)][0].id // empty')"
+    if [[ -n "$id" ]]; then
+      printf '%s' "$id"
+      return 0
+    fi
+    count="$(printf '%s' "$page" | jq '(.data // []) | length')"
+    [[ "$count" -ge 1000 ]] || break
+    offset=$((offset + 1000))
+  done
+  print_error "No athlete with bib \"$key\" on event $event_id."
+  exit 1
+}
+
+# The JSON fields an `athletes add` or `athletes set` flag list names,
+# comma-joined: --name, --bib, --gender (F/W/M or female/male), --race (a
+# course key; --no-race clears it), --ref (the timing company's id),
+# --tracker (the provider's tracker id; --no-tracker takes it away), --source
+# (its tracking source, when the event has several), --hidden and --visible.
+athlete_fields() {
+  local fields=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --no-race)    fields+=("\"route_key\":null"); shift; continue ;;
+      --no-tracker) fields+=("\"tracker_ref\":null"); shift; continue ;;
+      --hidden)     fields+=("\"hidden\":true"); shift; continue ;;
+      --visible)    fields+=("\"hidden\":false"); shift; continue ;;
+    esac
+    if [[ $# -lt 2 ]]; then
+      print_error "Unknown athlete option, or one missing its value: $1"
+      exit 2
+    fi
+    case "$1" in
+      --name)    fields+=("\"name\":$(json_string "$2")") ;;
+      --bib)     fields+=("\"bib\":$(json_string "$2")") ;;
+      --gender)  fields+=("\"gender\":$(json_string "$2")") ;;
+      --race)    fields+=("\"route_key\":$(json_string "$2")") ;;
+      --ref)     fields+=("\"external_ref\":$(json_string "$2")") ;;
+      --tracker) fields+=("\"tracker_ref\":$(json_string "$2")") ;;
+      --source)  fields+=("\"source_key\":$(json_string "$2")") ;;
+      *) print_error "Unknown athlete option: $1"; exit 2 ;;
+    esac
+    shift 2
+  done
+  if [[ ${#fields[@]} -gt 0 ]]; then
+    (IFS=,; printf '%s' "${fields[*]}")
+  fi
+}
+
+# An event's roster and the trackers that place athletes on the map
+# (references/API.md, Athletes and trackers). An athlete is named by id or bib.
+cmd_athletes() {
+  local action="${1:-}" event_id="${2:-}"
+  shift 2 || true
+  [[ -n "$action" && -n "$event_id" ]] || usage
+  case "$action" in
+    list)
+      local limit="200" offset="0"
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --limit) limit="${2:-}"; shift 2 ;;
+          --offset) offset="${2:-}"; shift 2 ;;
+          *) usage ;;
+        esac
+      done
+      request GET "/events/${event_id}/athletes?limit=$(url_encode "$limit")&offset=$(url_encode "$offset")"
+      ;;
+    add)
+      local name="${1:-}" fields
+      [[ -n "$name" ]] || usage
+      shift
+      fields="$(athlete_fields "$@")"
+      request POST "/events/${event_id}/athletes" "{\"name\":$(json_string "$name")${fields:+,$fields}}"
+      ;;
+    import)
+      # A JSON array of rows, or {"athletes": [...]}, with the API's row
+      # fields. Sent 1,000 rows a call; a row matches by id, then bib, then
+      # external_ref, so importing the same list again updates it.
+      local roster_file="${1:-}"
+      [[ -n "$roster_file" ]] || usage
+      if [[ ! -f "$roster_file" ]]; then
+        print_error "Roster not found: $roster_file"
+        exit 1
+      fi
+      if ! command -v jq >/dev/null 2>&1; then
+        print_error "jq is required for athletes import; install jq or call athletes add per row."
+        exit 1
+      fi
+      local rows count from=0 batch
+      rows="$(jq -c 'if type == "array" then . else .athletes end' "$roster_file")"
+      count="$(printf '%s' "$rows" | jq 'length')"
+      while [[ "$from" -lt "$count" ]]; do
+        batch="$(printf '%s' "$rows" | jq -c --argjson from "$from" '{athletes: .[$from:$from + 1000]}')"
+        request POST "/events/${event_id}/athletes/batch" "$batch" | jq --argjson from "$from" '
+          if .data then {
+            rows: "\($from + 1)-\($from + (.data | length))",
+            created: ([.data[] | select(.status == "created")] | length),
+            updated: ([.data[] | select(.status == "updated")] | length),
+            errors: [.data[] | select(.status == "error") | {row: ($from + .index + 1), errors}]
+          } else . end'
+        from=$((from + 1000))
+      done
+      ;;
+    set)
+      local ref="${1:-}" aid fields
+      [[ -n "$ref" ]] || usage
+      shift
+      fields="$(athlete_fields "$@")"
+      [[ -n "$fields" ]] || usage
+      aid="$(resolve_athlete_id "$event_id" "$ref")"
+      request PATCH "/events/${event_id}/athletes/${aid}" "{${fields}}"
+      ;;
+    remove)
+      [[ $# -gt 0 ]] || usage
+      local ref aid
+      for ref in "$@"; do
+        aid="$(resolve_athlete_id "$event_id" "$ref")"
+        request DELETE "/events/${event_id}/athletes/${aid}"
+      done
+      ;;
+    photo)
+      # A png, jpg or webp of at most 5 MB; --remove takes it away.
+      local ref="${1:-}" image="${2:-}" aid
+      [[ -n "$ref" && -n "$image" ]] || usage
+      if [[ "$image" != "--remove" && ! -f "$image" ]]; then
+        print_error "Photo not found: $image"
+        exit 1
+      fi
+      aid="$(resolve_athlete_id "$event_id" "$ref")"
+      if [[ "$image" == "--remove" ]]; then
+        request DELETE "/events/${event_id}/athletes/${aid}/photo"
+      else
+        request_multipart PUT "/events/${event_id}/athletes/${aid}/photo" "photo=@\"${image}\""
+      fi
+      ;;
+    trackers)
+      local query="limit=1000"
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --unassigned) query+="&unassigned=true"; shift ;;
+          --source) query+="&source_key=$(url_encode "${2:-}")"; shift 2 ;;
+          *) usage ;;
+        esac
+      done
+      request GET "/events/${event_id}/trackers?${query}"
+      ;;
+    assign)
+      # What one tracker stands for: an athlete (--bib or --athlete), a camera
+      # that isn't on the Stream app (--camera), or nothing (--none). A tracker
+      # id that hasn't reported yet is registered.
+      local tracker="${1:-}" subject="" source_key=""
+      [[ -n "$tracker" ]] || usage
+      shift
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --bib) subject="\"bib\":$(json_string "${2:-}")"; shift 2 ;;
+          --athlete) subject="\"athlete_id\":$(json_string "${2:-}")"; shift 2 ;;
+          --camera) subject="\"stream_id\":$(json_string "${2:-}")"; shift 2 ;;
+          --none) subject="none"; shift ;;
+          --source) source_key="${2:-}"; shift 2 ;;
+          *) usage ;;
+        esac
+      done
+      [[ -n "$subject" ]] || usage
+      local assignment="\"tracker_ref\":$(json_string "$tracker")"
+      [[ -n "$source_key" ]] && assignment+=",\"source_key\":$(json_string "$source_key")"
+      [[ "$subject" != "none" ]] && assignment+=",${subject}"
+      request POST "/events/${event_id}/trackers/assign" "{\"assignments\":[{${assignment}}]}"
+      ;;
+    connect)
+      # Connects a tracking provider that posts positions to us and prints the
+      # webhook URL to give them. Today's provider: lnx. The URL is a
+      # credential: share it only with the provider.
+      local adapter="${1:-}" source_key=""
+      [[ -n "$adapter" ]] || usage
+      shift
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --source) source_key="${2:-}"; shift 2 ;;
+          *) usage ;;
+        esac
+      done
+      cmd_mcp call add_tracking_source "{\"event_id\":$(json_string "$event_id"),\"adapter_key\":$(json_string "$adapter")${source_key:+,\"source_key\":$(json_string "$source_key")}}"
+      ;;
+    *) usage ;;
+  esac
+}
+
 usage() {
   cat <<'EOF'
 Usage:
@@ -1274,6 +1483,7 @@ Usage:
   bash scripts/streambridge sponsors list|show|add|set|replace-asset|pause|resume|remove|import ...
   bash scripts/streambridge courses list|rebuild-world ...
   bash scripts/streambridge world pull|check|push|place|remove ...
+  bash scripts/streambridge athletes list|add|import|set|remove|photo|trackers|assign|connect <event-id> ...
   bash scripts/streambridge public viewer-token|invite|stream|device-session|livekit|telemetry|stream-metrics|leaderboard|results ...
 
 Examples:
@@ -1296,6 +1506,12 @@ Examples:
   bash scripts/streambridge world place <event-id> --kind sponsor --campaign cell_c --course 100_miler --km 10
   bash scripts/streambridge world place <event-id> --kind sponsor --campaign cell_c --course 100_miler --km 0.1 --prop arch
   bash scripts/streambridge world place <event-id> --kind point --type water --course 100_miler --km 21.1 --label "Km 21 water"
+  bash scripts/streambridge athletes import <event-id> roster.json
+  bash scripts/streambridge athletes add <event-id> "Anna Smit" --bib 101 --gender F --race full --tracker LNX-0042
+  bash scripts/streambridge athletes set <event-id> 101 --race half
+  bash scripts/streambridge athletes photo <event-id> 101 anna.jpg
+  bash scripts/streambridge athletes connect <event-id> lnx
+  bash scripts/streambridge athletes assign <event-id> LNX-0042 --bib 101
   bash scripts/streambridge public device-session <stream-key> <device-id>
   bash scripts/streambridge api GET /organizations
   bash scripts/streambridge mcp call create_viewer_token '{"event_id":"...","viewer_name":"Viewer"}'
@@ -1320,6 +1536,7 @@ main() {
     sponsors) cmd_sponsors "$@" ;;
     courses) cmd_courses "$@" ;;
     world) cmd_world "$@" ;;
+    athletes) cmd_athletes "$@" ;;
     public) cmd_public "$@" ;;
     help|-h|--help|"") usage 0 ;;
     *) usage ;;

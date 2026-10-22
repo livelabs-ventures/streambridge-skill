@@ -198,6 +198,30 @@ bash scripts/streambridge world remove <event-id> <element-id>
 
 `world place` flags: `--kind`, `--type`, `--course`, `--km`, `--lat`, `--lng`, `--campaign`, `--label`, `--note`, `--action`, `--camera`, `--url`, `--prop` (`arch`, `board`, `flag_line`, `inflatable`, `podium`, `airship`; a sponsor as a 3D prop), `--heading` (degrees, for a prop at a point), `--hidden`.
 
+## Athletes and trackers
+
+An athlete is named by id or bib. See `API.md` (Athletes and trackers) for the row fields.
+
+```bash
+bash scripts/streambridge athletes list <event-id> [--limit 200] [--offset 0]
+bash scripts/streambridge athletes import <event-id> roster.json
+bash scripts/streambridge athletes add <event-id> "Anna Smit" --bib 101 --gender F --race full --ref TIM-1 --tracker LNX-0042
+bash scripts/streambridge athletes set <event-id> 101 --race half --visible
+bash scripts/streambridge athletes set <event-id> 101 --no-tracker
+bash scripts/streambridge athletes remove <event-id> 101 102
+bash scripts/streambridge athletes photo <event-id> 101 anna.jpg
+bash scripts/streambridge athletes photo <event-id> 101 --remove
+bash scripts/streambridge athletes connect <event-id> lnx [--source <source-key>]
+bash scripts/streambridge athletes trackers <event-id> [--unassigned] [--source <source-key>]
+bash scripts/streambridge athletes assign <event-id> <tracker-ref> --bib 101 [--source <source-key>]
+bash scripts/streambridge athletes assign <event-id> <tracker-ref> --camera <stream-id>
+bash scripts/streambridge athletes assign <event-id> <tracker-ref> --none
+```
+
+`athletes add` and `athletes set` flags: `--name`, `--bib`, `--gender` (`F`/`W`/`M` or `female`/`male`), `--race` (a course key from `courses list`; `--no-race` clears it), `--ref` (the timing company's id), `--tracker` (the provider's tracker id; `--no-tracker` takes it away), `--source` (the tracking source, when the event has more than one), `--hidden`, `--visible`.
+
+`roster.json` is a JSON array of rows (or `{"athletes": [...]}`) with `name`, `bib`, `gender`, `route_key`, `external_ref`, `hidden`, `tracker_ref` and `source_key`. It is sent 1,000 rows a call; the answer counts created and updated rows and lists each row in error with its reasons. Connect the tracking source before rows carry `tracker_ref`. `connect` uses MCP, so it needs Python 3.10+; it returns the source's webhook URL, a credential to give only to the provider.
+
 ## Public device and viewer flows
 
 ```bash
