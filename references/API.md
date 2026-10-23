@@ -327,6 +327,10 @@ The MCP tool set is narrower than the full REST API. When a route is not exposed
 - `assign_trackers`
 - `add_tracking_source`
 
+The event tools (`list_events`, `get_event`, `update_event`, `create_viewer_token`), the
+world tools and the athlete tools also reach the events the caller manages for another
+organization; the camera tools stay with the caller's own organization.
+
 ## Host MCP tools (`/mcp/chatgpt`)
 
 This dedicated profile uses resource-bound OAuth access tokens, organization
