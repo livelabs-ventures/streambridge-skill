@@ -200,7 +200,7 @@ If the CLI fails:
 - Prefer the bash CLI over the Python helpers for repeatable operations.
 - Use `references/API.md` when the CLI wrapper does not cover the exact endpoint.
 - Inspect the tool list in the intended MCP profile before assuming a tool exists.
-- An account made a manager of another organization's event reaches that event through the CLI and general MCP: `events list` and `list_events` show it with `access: "manager"`. A manager can run its cameras, roster, world and live show, but can't delete it or create events in that organization.
+- An account with its own organization that was made a manager of another organization's event reaches that event through the CLI and general MCP: `events list` and `list_events` show it with `access: "manager"`. A manager can run its cameras, roster, world and live show, but can't delete it or create events in that organization.
 - REST base overrides: `STREAMBRIDGE_API_BASE` (preferred), `STREAMBRIDGE_API_BASE_URL`, or `STREAMBRIDGE_API_URL`; either origin or `/api/v1` URL is accepted. `STREAMBRIDGE_MCP_URL` overrides the selected profile endpoint.
 - The public GitHub skill and downloadable zip follow main publication and API deployment; a branch update is source verification only.
 

@@ -299,8 +299,6 @@ also has custom page, workspace, and live tools, uses `get_stream_invite` instea
 of `get_stream_invite_url`, and does not expose `create_viewer_token`. Discover
 the list from the endpoint you actually use. Direct REST covers viewer tokens.
 
-Tools act on the caller's organization's events and on the events they were made a manager of (`list_events` gives each its `access`, `"owner"` or `"manager"`). A manager may do everything but delete the event or create events in its organization; an account whose only role is managing events is admitted too.
-
 The MCP tool set is narrower than the full REST API. When a route is not exposed as an MCP tool, use the bash CLI wrapper or direct REST fallback above.
 
 - `list_events`
@@ -328,6 +326,11 @@ The MCP tool set is narrower than the full REST API. When a route is not exposed
 - `remove_athletes`
 - `assign_trackers`
 - `add_tracking_source`
+
+Every tool also reaches the events the caller manages for another organization, cameras
+included (`list_events` gives each event's `access`, `"owner"` or `"manager"`). A manager
+may do everything there but delete the event. `/mcp` refuses an account with no
+organization of its own.
 
 ## Host MCP tools (`/mcp/chatgpt`)
 
