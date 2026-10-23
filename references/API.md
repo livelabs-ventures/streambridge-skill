@@ -58,7 +58,8 @@ Event list accepts `query`, `page`, `per_page` (max 100), `event_type`
 (`all`, `default`, or `manual`), and `sort` (`newest`, `oldest`, `name_asc`, `name_desc`, `updated`).
 Event writes use an `event` object. REST accepts `name`, `is_default`,
 `template_key`, `shortcode`, `subtitle`, `description`, `starts_at`, `ends_at`,
-`live_only`, and `onboarding`. `timezone` is supported by the scoped host API,
+`live_only`, `logo_in_header` (the event's logo top left on its public page, in
+place of StreamBridge's, while it has a logo), and `onboarding`. `timezone` is supported by the scoped host API,
 not the general event write endpoint.
 The public page at `https://app.streambridge.live/v/<event-id>` exists on creation;
 management is at `/events/<event-id>`.
