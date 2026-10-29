@@ -1469,6 +1469,49 @@ cmd_athletes() {
   esac
 }
 
+# Who registered for an event's pre-show reminder (references/API.md,
+# Pre-show registrations): list as JSON, or export every row as CSV to a file
+# or stdout.
+cmd_registrations() {
+  local action="${1:-}" event_id="${2:-}"
+  shift 2 || true
+  [[ -n "$action" && -n "$event_id" ]] || usage
+  case "$action" in
+    list)
+      local limit="200" offset="0"
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --limit) limit="${2:-}"; shift 2 ;;
+          --offset) offset="${2:-}"; shift 2 ;;
+          *) usage ;;
+        esac
+      done
+      request GET "/events/${event_id}/registrations?limit=$(url_encode "$limit")&offset=$(url_encode "$offset")"
+      ;;
+    export)
+      local out="${1:-}" body_file status
+      ensure_token
+      body_file="$(mktemp)"
+      status="$(curl -sS -o "$body_file" -w '%{http_code}' "${API_BASE%/}/events/${event_id}/registrations.csv" \
+        -H "Accept: text/csv" -H "Authorization: Bearer ${TOKEN}")"
+      if [[ "$status" -ge 400 ]]; then
+        pretty_json < "$body_file" >&2
+        rm -f "$body_file"
+        print_error "HTTP ${status} GET /events/${event_id}/registrations.csv"
+        exit 1
+      fi
+      if [[ -n "$out" ]]; then
+        mv "$body_file" "$out"
+        print_error "Saved $(($(wc -l < "$out") - 1)) registrations to ${out}"
+      else
+        cat "$body_file"
+        rm -f "$body_file"
+      fi
+      ;;
+    *) usage ;;
+  esac
+}
+
 usage() {
   cat <<'EOF'
 Usage:
@@ -1487,6 +1530,7 @@ Usage:
   bash scripts/streambridge courses list|rebuild-world ...
   bash scripts/streambridge world pull|check|push|place|remove ...
   bash scripts/streambridge athletes list|add|import|set|remove|photo|trackers|assign|connect <event-id> ...
+  bash scripts/streambridge registrations list|export <event-id> ...
   bash scripts/streambridge public viewer-token|invite|stream|device-session|livekit|telemetry|stream-metrics|leaderboard|results ...
 
 Examples:
@@ -1513,6 +1557,7 @@ Examples:
   bash scripts/streambridge athletes add <event-id> "Anna Smit" --bib 101 --gender F --race full --tracker LNX-0042
   bash scripts/streambridge athletes set <event-id> 101 --race half
   bash scripts/streambridge athletes photo <event-id> 101 anna.jpg
+  bash scripts/streambridge registrations export <event-id> registrations.csv
   bash scripts/streambridge athletes connect <event-id> lnx
   bash scripts/streambridge athletes assign <event-id> LNX-0042 --bib 101
   bash scripts/streambridge public device-session <stream-key> <device-id>
@@ -1540,6 +1585,7 @@ main() {
     courses) cmd_courses "$@" ;;
     world) cmd_world "$@" ;;
     athletes) cmd_athletes "$@" ;;
+    registrations) cmd_registrations "$@" ;;
     public) cmd_public "$@" ;;
     help|-h|--help|"") usage 0 ;;
     *) usage ;;

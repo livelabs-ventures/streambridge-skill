@@ -220,6 +220,17 @@ Hosts only; reads need `events_read`, writes `events_write`.
 - `POST /events/:event_id/trackers/assign`: body `{assignments: [{tracker_id | tracker_ref (+ source_key), athlete_id | bib | stream_id}]}`; a `tracker_ref` that hasn't reported yet is registered
 - Tracking sources are data sources: `POST /events/:event_id/destination/data-sources` with `adapter_key: "lnx"` answers a `webhook_url` for the provider; `GET …/data-sources/:id/webhook-deliveries` shows what it posted
 
+### Pre-show registrations
+
+An event's pre-show (`pre_show: true` on `PATCH /events/:event_id`, with
+`starts_at`, `subtitle` as its headline and `timezone`, an IANA zone, as its
+pin) shows a countdown and Remind me before the start. Registering asks to be
+emailed once when a host goes live. Hosts only; `events_read`.
+
+- `GET /events/:event_id/registrations`: newest first (`limit` ≤ 1,000, `offset`; `meta.total`), each `{id, registered_at, email, name, username, time_zone, notified_at}`
+- `GET /events/:event_id/registrations.csv`: every row as CSV, the same columns without `id`
+- `GET /public/events/:event_id/registrations`: anyone: `{count, places: [{time_zone, count}], registered}`
+
 ### Public device and viewer endpoints
 
 - `POST /public/events/:event_id/viewer_token`

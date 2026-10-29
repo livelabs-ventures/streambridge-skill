@@ -224,6 +224,19 @@ bash scripts/streambridge athletes assign <event-id> <tracker-ref> --none
 
 `roster.json` is a JSON array of rows (or `{"athletes": [...]}`) with `name`, `bib`, `gender`, `route_key`, `external_ref`, `hidden`, `tracker_ref` and `source_key`. It is sent 1,000 rows a call; the answer counts created and updated rows and lists each row in error with its reasons. Connect the tracking source before rows carry `tracker_ref`. `connect` uses MCP, so it needs Python 3.10+; it returns the source's webhook URL, a credential to give only to the provider.
 
+## Pre-show registrations
+
+Turn an event's pre-show on (the countdown and Remind me before it starts), then see who registered for its go-live email. See `API.md` (Pre-show registrations).
+
+```bash
+bash scripts/streambridge api PATCH /events/<event-id> '{"event":{"pre_show":true,"subtitle":"Going mainstream.","timezone":"Africa/Johannesburg","starts_at":"2026-11-03T15:00:00Z","ends_at":"2026-11-03T16:00:00Z"}}'
+bash scripts/streambridge registrations list <event-id> [--limit 200] [--offset 0]
+bash scripts/streambridge registrations export <event-id> registrations.csv
+bash scripts/streambridge registrations export <event-id> > registrations.csv
+```
+
+`registrations list` answers a page, newest first (`--limit`, at most 1,000; `meta.total` counts all). `export` writes every row as CSV: `registered_at`, `email`, `name`, `username`, `time_zone` and `notified_at` (when the go-live email went).
+
 ## Public device and viewer flows
 
 ```bash

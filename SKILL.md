@@ -1,6 +1,6 @@
 ---
 name: streambridge
-description: Use StreamBridge from Claude Code, Codex, Manus, and other skills-compatible agents. Use it for events, cameras, invite links, viewer tokens, pages, live controls, sponsors, the play world layer (sponsor placements, course points and hotspots in an event's 3D world), athletes and trackers (the roster, start-list imports, athlete photos, LNX tracking and who each tracker places on the map), feedback, and direct API or MCP access.
+description: Use StreamBridge from Claude Code, Codex, Manus, and other skills-compatible agents. Use it for events, cameras, invite links, viewer tokens, pages, live controls, sponsors, the play world layer (sponsor placements, course points and hotspots in an event's 3D world), athletes and trackers (the roster, start-list imports, athlete photos, LNX tracking and who each tracker places on the map), pre-show registrations (who registered for an event's go-live email, and CSV export), feedback, and direct API or MCP access.
 license: Proprietary
 ---
 
@@ -75,6 +75,7 @@ links. `embedded_ui=true` does not imply remote capture or verified video.
 - Courses and their play worlds: `bash scripts/streambridge courses ...`
 - The play world layer (sponsor placements, course points, hotspots): `bash scripts/streambridge world ...`
 - Athletes and trackers (roster, start-list import, photos, LNX tracking): `bash scripts/streambridge athletes ...`
+- Pre-show registrations (who asked to be emailed when the event goes live; CSV export): `bash scripts/streambridge registrations ...`
 - Direct REST fallback: `bash scripts/streambridge api <METHOD> <PATH> '<json>'`
 - Direct MCP fallback: `bash scripts/streambridge mcp call <tool> '<json>'`
 
